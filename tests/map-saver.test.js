@@ -245,3 +245,33 @@ test("automatic backups are pruned independently from user-created maps", () => 
   assert.equal(result.records.filter(item => item.autoBackup).length, api.constants.MAX_AUTO_BACKUPS);
   assert.ok(result.records.some(item => item.id === "user"));
 });
+
+test("entry hooks use live ChatRoom dispatchers instead of captured map-view globals", () => {
+  const drawCalls = [];
+  const { api, context } = createRuntime({
+    ChatRoomMapViewIsActive: () => true,
+    ChatRoomMapViewEditMode: "",
+    DrawButton: (...args) => drawCalls.push(args),
+  });
+  const hooks = new Map();
+  api.installHooksForTest({
+    hookFunction(name, priority, callback) {
+      hooks.set(name, { priority, callback });
+    },
+  });
+
+  assert.ok(hooks.has("ChatRoomRun"));
+  assert.ok(hooks.has("ChatRoomClick"));
+  assert.equal(hooks.has("ChatRoomMapViewDrawUi"), false);
+  assert.equal(hooks.has("ChatRoomMapViewClick"), false);
+  assert.equal(api.shouldDrawEntryButton(), true);
+
+  let originalRunCalled = false;
+  hooks.get("ChatRoomRun").callback([], () => { originalRunCalled = true; return "run-result"; });
+  assert.equal(originalRunCalled, true);
+  assert.equal(drawCalls.length, 1);
+  assert.equal(drawCalls[0][4], "档");
+
+  context.ChatRoomMapViewEditMode = "Tile";
+  assert.equal(api.shouldDrawEntryButton(), false);
+});

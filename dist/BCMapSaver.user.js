@@ -2,7 +2,7 @@
 // @name         Bondage Club - Map Saver（核心脚本）
 // @name:zh-CN   Bondage Club - 地图存档（核心脚本）
 // @namespace    https://github.com/stareyeXuanyeLin/BC-Map-Saver
-// @version      0.1.0
+// @version      0.1.1
 // @description  在本地保存、导入、导出并重建 Bondage Club 聊天室地图。
 // @author       林宣夜＆佩菈
 // @match        https://www.bondageprojects.com/R*/*
@@ -27,7 +27,7 @@
 
   const MOD_NAME = "BCMapSaver";
   const FULL_NAME = "BC Map Saver";
-  const VERSION = "0.1.0";
+  const VERSION = "0.1.1";
   const STORAGE_SCHEMA_VERSION = 1;
   const RECORD_STORAGE_VERSION = 1;
   const MAP_FILE_FORMAT = "BC_MAP_SAVER_MAP";
@@ -735,24 +735,26 @@
   }
 
   function installHooks() {
-    modApi.hookFunction("ChatRoomMapViewDrawUi", 0, (args, next) => {
+    // ChatRoomViews.Map captures DrawUi and Click function references while BC initializes.
+    // Hooking ChatRoomMapViewDrawUi/Click later would only replace the globals, while the
+    // active view keeps calling its captured originals. Hook the live room dispatchers.
+    modApi.hookFunction("ChatRoomRun", 0, (args, next) => {
       const result = next(args);
-      if (uiOpen && !isRoomAdmin()) closeUI();
+      if (uiOpen && (!isMapRoom() || !isRoomAdmin() || typeof globalThis.ChatRoomMapViewIsActive !== "function" || !ChatRoomMapViewIsActive())) closeUI();
       if (shouldDrawEntryButton() && typeof globalThis.DrawButton === "function") {
         DrawButton(ENTRY_BUTTON.x, ENTRY_BUTTON.y, ENTRY_BUTTON.width, ENTRY_BUTTON.height, "档", "#DDEBFF", "");
       }
       return result;
     });
-    modApi.hookFunction("ChatRoomMapViewClick", 1000, (args, next) => {
+    modApi.hookFunction("ChatRoomClick", 1000, (args, next) => {
       if (shouldDrawEntryButton() && typeof globalThis.MouseIn === "function" && MouseIn(ENTRY_BUTTON.x, ENTRY_BUTTON.y, ENTRY_BUTTON.width, ENTRY_BUTTON.height)) {
         openUI();
         return;
       }
       return next(args);
     });
-    for (const functionName of ["ChatRoomLeave", "ChatRoomMapViewDeactivate"]) {
-      if (typeof globalThis[functionName] !== "function") continue;
-      modApi.hookFunction(functionName, 1000, (args, next) => {
+    if (typeof globalThis.ChatRoomLeave === "function") {
+      modApi.hookFunction("ChatRoomLeave", 1000, (args, next) => {
         closeUI();
         return next(args);
       });
@@ -839,6 +841,8 @@
       getLibrary: () => cloneJSON(library),
       setLibrary: value => { library = normalizeLibrary(value); },
       setActiveStorageKey: value => { activeStorageKey = value; },
+      shouldDrawEntryButton,
+      installHooksForTest: api => { modApi = api; installHooks(); },
       constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS },
     };
   } else {

@@ -76,6 +76,8 @@
       getLibrary: () => cloneJSON(library),
       setLibrary: value => { library = normalizeLibrary(value); },
       setActiveStorageKey: value => { activeStorageKey = value; },
+      shouldDrawEntryButton,
+      installHooksForTest: api => { modApi = api; installHooks(); },
       constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS },
     };
   } else {
