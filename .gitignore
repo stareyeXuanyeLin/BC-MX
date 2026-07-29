@@ -1,0 +1,25 @@
+# Dependencies and generated test output
+node_modules/
+coverage/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Local editor settings
+.vscode/
+.idea/
+
+# Local evidence and exports
+*.har
+*.trace
+screenshots/
+local-evidence/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Keep dist/ because it contains installable userscript artifacts.

@@ -1,0 +1,10 @@
+{
+  "name": "bc-map-saver-dev",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File ./build.ps1",
+    "test": "node --test --test-isolation=none tests/*.test.js",
+    "check": "node --check dist/BCMapSaver.user.js && node --check dist/BCMapSaver.loader.user.js"
+  }
+}
