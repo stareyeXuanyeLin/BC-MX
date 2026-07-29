@@ -28,7 +28,10 @@ function createLocalStorage() {
 }
 
 function createRuntime(overrides = {}) {
-  const localStorage = overrides.localStorage || createLocalStorage();
+  const lexicalBindings = overrides.lexicalBindings === true;
+  const cleanOverrides = { ...overrides };
+  delete cleanOverrides.lexicalBindings;
+  const localStorage = cleanOverrides.localStorage || createLocalStorage();
   const context = {
     console,
     TextEncoder,
@@ -57,10 +60,19 @@ function createRuntime(overrides = {}) {
     ChatRoomMapViewUpdateFlag: () => {},
     ChatRoomMapViewCalculatePerceptionMasks: () => {},
     ChatRoomSendLocal: () => {},
-    ...overrides,
+    ...cleanOverrides,
   };
   context.globalThis = context;
+  if (lexicalBindings) {
+    context.__chatRoomDataSeed = context.ChatRoomData;
+    context.__chatRoomMapManagerSeed = context.ChatRoomMapManager;
+    delete context.ChatRoomData;
+    delete context.ChatRoomMapManager;
+  }
   vm.createContext(context);
+  if (lexicalBindings) {
+    vm.runInContext("let ChatRoomData = __chatRoomDataSeed; const ChatRoomMapManager = __chatRoomMapManagerSeed;", context);
+  }
   vm.runInContext(source, context, { filename: "BCMapSaver.user.js" });
   return { api: context.__BMS_TEST_API__, context, localStorage };
 }
@@ -178,6 +190,18 @@ test("backs up malformed local storage before allowing a fresh library write", (
   assert.equal(localStorage.getItem(recoveryKeys[0]), "{broken json");
   api.addRecord(record(api, "fresh", "新地图"));
   assert.equal(api.getLibrary().records.length, 1);
+});
+
+test("reads current BC room data and map manager from top-level lexical bindings", () => {
+  const { api, context } = createRuntime({ lexicalBindings: true });
+  assert.equal(Object.prototype.hasOwnProperty.call(context, "ChatRoomData"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(context, "ChatRoomMapManager"), false);
+  assert.equal(api.isMapRoom(), true);
+
+  api.setActiveStorageKey("lexical-test");
+  const saved = api.saveCurrentMapAsNew("词法地图");
+  assert.equal(saved.payload, "native-map-payload");
+  assert.equal(saved.sourceRoomName, "测试地图房");
 });
 
 test("saving and overwriting current room maps require admin and use BC exportString", () => {

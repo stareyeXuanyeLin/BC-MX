@@ -2,7 +2,7 @@
 // @name         Bondage Club - Map Saver（正式版加载器）
 // @name:zh-CN   Bondage Club - 地图存档（正式版加载器）
 // @namespace    https://github.com/stareyeXuanyeLin/BC-Map-Saver
-// @version      0.1.1
+// @version      0.1.2
 // @description  Fetches and executes the latest BC Map Saver from the official branch with a privileged request and network fallback.
 // @description:zh-CN 每次进入页面时通过特权请求获取并执行 main 分支的最新 BC Map Saver，并在网络故障时自动切换备用源。
 // @author       林宣夜＆佩菈

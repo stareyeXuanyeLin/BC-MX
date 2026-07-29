@@ -2,7 +2,7 @@
 // @name         Bondage Club - Map Saver（核心脚本）
 // @name:zh-CN   Bondage Club - 地图存档（核心脚本）
 // @namespace    https://github.com/stareyeXuanyeLin/BC-Map-Saver
-// @version      0.1.1
+// @version      0.1.2
 // @description  在本地保存、导入、导出并重建 Bondage Club 聊天室地图。
 // @author       林宣夜＆佩菈
 // @match        https://www.bondageprojects.com/R*/*

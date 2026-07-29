@@ -57,13 +57,14 @@
     if (!uiOpen) return;
     const root = ensureRoot();
     const records = sortedRecords();
+    const room = getChatRoomData();
     root.innerHTML = `<section class="bms-panel" role="dialog" aria-modal="true" aria-label="地图存档">
       <header class="bms-header"><div><div class="bms-title">地图存档</div><div class="bms-subtitle">本地保存，不写入角色数据 · v${VERSION}</div></div><div class="bms-spacer"></div><button class="bms-btn bms-btn-quiet" data-action="close">关闭</button></header>
       <div class="bms-toolbar">
         <button class="bms-btn bms-btn-primary" data-action="save-new">保存当前地图</button>
         <button class="bms-btn" data-action="import">导入文件</button>
         <button class="bms-btn" data-action="export-all" ${records.length ? "" : "disabled"}>导出全部</button>
-        <span class="bms-status">当前房间：<strong>${escapeHTML(globalThis.ChatRoomData?.Name || "未知")}</strong>　共 ${records.length} 张地图${library.loadError ? `　<span class="bms-warning">检测到损坏数据，恢复副本：${escapeHTML(storageRecoveryKey || "创建失败")}</span>` : ""}</span>
+        <span class="bms-status">当前房间：<strong>${escapeHTML(room?.Name || "未知")}</strong>　共 ${records.length} 张地图${library.loadError ? `　<span class="bms-warning">检测到损坏数据，恢复副本：${escapeHTML(storageRecoveryKey || "创建失败")}</span>` : ""}</span>
       </div>
       <main class="bms-list">${records.length ? records.map(recordCardHTML).join("") : '<div class="bms-empty">还没有本地地图。<br>点击“保存当前地图”创建第一张存档。</div>'}</main>
       <input id="${FILE_INPUT_ID}" type="file" accept=".json,.bcmap,.bcmapset,text/plain,application/json" hidden>
@@ -112,7 +113,7 @@
   }
 
   function showMapForm(title, record, onSave) {
-    const name = record?.name || globalThis.ChatRoomData?.Name || `地图 ${localTimestamp(now())}`;
+    const name = record?.name || getChatRoomData()?.Name || `地图 ${localTimestamp(now())}`;
     const note = record?.note || "";
     showDialog(title, `<label class="bms-field"><span>名称</span><input class="bms-name-input" maxlength="80" value="${escapeHTML(name)}"></label><label class="bms-field"><span>备注</span><textarea class="bms-note-input" maxlength="500">${escapeHTML(note)}</textarea></label>`, [
       { label: "取消", onClick: closeDialog },
@@ -207,12 +208,12 @@
         toast("地图已删除", "success");
       }, true);
     } else if (action === "overwrite") {
-      showConfirm("覆盖本地存档", `用房间“${globalThis.ChatRoomData?.Name || "当前房间"}”的当前地图覆盖“${record.name}”？`, "覆盖保存", () => {
+      showConfirm("覆盖本地存档", `用房间“${getChatRoomData()?.Name || "当前房间"}”的当前地图覆盖“${record.name}”？`, "覆盖保存", () => {
         overwriteSavedMapFromCurrent(record.id);
         toast("本地存档已覆盖", "success");
       });
     } else if (action === "apply") {
-      showConfirm("覆盖当前房间地图", `将“${record.name}”应用到房间“${globalThis.ChatRoomData?.Name || "当前房间"}”，并同步给房间内所有玩家。插件会先自动备份当前地图。`, "应用并同步", () => {
+      showConfirm("覆盖当前房间地图", `将“${record.name}”应用到房间“${getChatRoomData()?.Name || "当前房间"}”，并同步给房间内所有玩家。插件会先自动备份当前地图。`, "应用并同步", () => {
         applySavedMapToRoom(record.id);
         toast("地图已载入，等待 BC 同步房间", "success");
       });

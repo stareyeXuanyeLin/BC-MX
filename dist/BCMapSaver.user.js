@@ -2,7 +2,7 @@
 // @name         Bondage Club - Map Saver（核心脚本）
 // @name:zh-CN   Bondage Club - 地图存档（核心脚本）
 // @namespace    https://github.com/stareyeXuanyeLin/BC-Map-Saver
-// @version      0.1.1
+// @version      0.1.2
 // @description  在本地保存、导入、导出并重建 Bondage Club 聊天室地图。
 // @author       林宣夜＆佩菈
 // @match        https://www.bondageprojects.com/R*/*
@@ -27,7 +27,7 @@
 
   const MOD_NAME = "BCMapSaver";
   const FULL_NAME = "BC Map Saver";
-  const VERSION = "0.1.1";
+  const VERSION = "0.1.2";
   const STORAGE_SCHEMA_VERSION = 1;
   const RECORD_STORAGE_VERSION = 1;
   const MAP_FILE_FORMAT = "BC_MAP_SAVER_MAP";
@@ -85,6 +85,22 @@
     return `${STORAGE_PREFIX}:${Number.isInteger(member) ? member : "anonymous"}`;
   };
   const emptyLibrary = () => ({ schemaVersion: STORAGE_SCHEMA_VERSION, records: [] });
+
+  // Current BC declares some shared values with top-level let/const. Those bindings are
+  // visible by identifier to later scripts, but are intentionally absent from globalThis.
+  function getChatRoomData() {
+    try {
+      if (typeof ChatRoomData !== "undefined") return ChatRoomData;
+    } catch (_) { /* fall through to legacy window property */ }
+    return globalThis.ChatRoomData ?? null;
+  }
+
+  function getChatRoomMapManager() {
+    try {
+      if (typeof ChatRoomMapManager !== "undefined") return ChatRoomMapManager;
+    } catch (_) { /* fall through to legacy window property */ }
+    return globalThis.ChatRoomMapManager ?? null;
+  }
 
   function toast(message, kind = "info") {
     const host = document.getElementById(ROOT_ID) || document.body;
@@ -421,7 +437,7 @@
 
 
   function isMapRoom() {
-    const type = globalThis.ChatRoomData?.MapData?.Type;
+    const type = getChatRoomData()?.MapData?.Type;
     return type === "Always" || type === "Hybrid";
   }
 
@@ -437,16 +453,18 @@
 
   function exportCurrentNativeMap() {
     assertRoomMapAction();
-    if (typeof globalThis.ChatRoomMapManager?.Map?.exportString !== "function") throw new Error("当前 BC 版本缺少地图导出接口");
-    const payload = ChatRoomMapManager.Map.exportString();
+    const manager = getChatRoomMapManager();
+    if (typeof manager?.Map?.exportString !== "function") throw new Error("当前 BC 版本缺少地图导出接口");
+    const payload = manager.Map.exportString();
     if (typeof payload !== "string" || !payload) throw new Error("BC 无法导出当前地图");
     return payload;
   }
 
   function currentMapMetadata() {
+    const room = getChatRoomData();
     return {
-      sourceRoomName: clampText(globalThis.ChatRoomData?.Name, 120),
-      mapType: globalThis.ChatRoomData?.MapData?.Type,
+      sourceRoomName: clampText(room?.Name, 120),
+      mapType: room?.MapData?.Type,
     };
   }
 
@@ -465,7 +483,7 @@
 
   function createCurrentMapBackup(targetName) {
     const payload = exportCurrentNativeMap();
-    const roomName = clampText(globalThis.ChatRoomData?.Name, 60) || "当前房间";
+    const roomName = clampText(getChatRoomData()?.Name, 60) || "当前房间";
     return createMapRecord(payload, {
       name: `自动备份 · ${roomName} · ${localTimestamp(now())}`,
       note: `加载“${clampText(targetName, 80)}”前自动创建`,
@@ -476,7 +494,8 @@
 
   function applySavedMapToRoom(recordId) {
     assertRoomMapAction();
-    if (typeof globalThis.ChatRoomMapManager?.Map?.importString !== "function") throw new Error("当前 BC 版本缺少地图导入接口");
+    const manager = getChatRoomMapManager();
+    if (typeof manager?.Map?.importString !== "function") throw new Error("当前 BC 版本缺少地图导入接口");
     if (typeof globalThis.ChatRoomMapViewUpdateFlag !== "function") throw new Error("当前 BC 版本缺少地图同步接口");
     if (typeof globalThis.ChatRoomMapViewCalculatePerceptionMasks !== "function") throw new Error("当前 BC 版本缺少地图刷新接口");
     const record = findRecord(recordId);
@@ -487,7 +506,7 @@
 
     let imported = false;
     try {
-      imported = ChatRoomMapManager.Map.importString(record.payload) === true;
+      imported = manager.Map.importString(record.payload) === true;
     } catch (error) {
       warn("BC 地图导入器抛出异常", error);
     }
@@ -563,13 +582,14 @@
     if (!uiOpen) return;
     const root = ensureRoot();
     const records = sortedRecords();
+    const room = getChatRoomData();
     root.innerHTML = `<section class="bms-panel" role="dialog" aria-modal="true" aria-label="地图存档">
       <header class="bms-header"><div><div class="bms-title">地图存档</div><div class="bms-subtitle">本地保存，不写入角色数据 · v${VERSION}</div></div><div class="bms-spacer"></div><button class="bms-btn bms-btn-quiet" data-action="close">关闭</button></header>
       <div class="bms-toolbar">
         <button class="bms-btn bms-btn-primary" data-action="save-new">保存当前地图</button>
         <button class="bms-btn" data-action="import">导入文件</button>
         <button class="bms-btn" data-action="export-all" ${records.length ? "" : "disabled"}>导出全部</button>
-        <span class="bms-status">当前房间：<strong>${escapeHTML(globalThis.ChatRoomData?.Name || "未知")}</strong>　共 ${records.length} 张地图${library.loadError ? `　<span class="bms-warning">检测到损坏数据，恢复副本：${escapeHTML(storageRecoveryKey || "创建失败")}</span>` : ""}</span>
+        <span class="bms-status">当前房间：<strong>${escapeHTML(room?.Name || "未知")}</strong>　共 ${records.length} 张地图${library.loadError ? `　<span class="bms-warning">检测到损坏数据，恢复副本：${escapeHTML(storageRecoveryKey || "创建失败")}</span>` : ""}</span>
       </div>
       <main class="bms-list">${records.length ? records.map(recordCardHTML).join("") : '<div class="bms-empty">还没有本地地图。<br>点击“保存当前地图”创建第一张存档。</div>'}</main>
       <input id="${FILE_INPUT_ID}" type="file" accept=".json,.bcmap,.bcmapset,text/plain,application/json" hidden>
@@ -618,7 +638,7 @@
   }
 
   function showMapForm(title, record, onSave) {
-    const name = record?.name || globalThis.ChatRoomData?.Name || `地图 ${localTimestamp(now())}`;
+    const name = record?.name || getChatRoomData()?.Name || `地图 ${localTimestamp(now())}`;
     const note = record?.note || "";
     showDialog(title, `<label class="bms-field"><span>名称</span><input class="bms-name-input" maxlength="80" value="${escapeHTML(name)}"></label><label class="bms-field"><span>备注</span><textarea class="bms-note-input" maxlength="500">${escapeHTML(note)}</textarea></label>`, [
       { label: "取消", onClick: closeDialog },
@@ -713,12 +733,12 @@
         toast("地图已删除", "success");
       }, true);
     } else if (action === "overwrite") {
-      showConfirm("覆盖本地存档", `用房间“${globalThis.ChatRoomData?.Name || "当前房间"}”的当前地图覆盖“${record.name}”？`, "覆盖保存", () => {
+      showConfirm("覆盖本地存档", `用房间“${getChatRoomData()?.Name || "当前房间"}”的当前地图覆盖“${record.name}”？`, "覆盖保存", () => {
         overwriteSavedMapFromCurrent(record.id);
         toast("本地存档已覆盖", "success");
       });
     } else if (action === "apply") {
-      showConfirm("覆盖当前房间地图", `将“${record.name}”应用到房间“${globalThis.ChatRoomData?.Name || "当前房间"}”，并同步给房间内所有玩家。插件会先自动备份当前地图。`, "应用并同步", () => {
+      showConfirm("覆盖当前房间地图", `将“${record.name}”应用到房间“${getChatRoomData()?.Name || "当前房间"}”，并同步给房间内所有玩家。插件会先自动备份当前地图。`, "应用并同步", () => {
         applySavedMapToRoom(record.id);
         toast("地图已载入，等待 BC 同步房间", "success");
       });

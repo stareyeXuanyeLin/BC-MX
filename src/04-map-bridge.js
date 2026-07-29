@@ -1,5 +1,5 @@
   function isMapRoom() {
-    const type = globalThis.ChatRoomData?.MapData?.Type;
+    const type = getChatRoomData()?.MapData?.Type;
     return type === "Always" || type === "Hybrid";
   }
 
@@ -15,16 +15,18 @@
 
   function exportCurrentNativeMap() {
     assertRoomMapAction();
-    if (typeof globalThis.ChatRoomMapManager?.Map?.exportString !== "function") throw new Error("当前 BC 版本缺少地图导出接口");
-    const payload = ChatRoomMapManager.Map.exportString();
+    const manager = getChatRoomMapManager();
+    if (typeof manager?.Map?.exportString !== "function") throw new Error("当前 BC 版本缺少地图导出接口");
+    const payload = manager.Map.exportString();
     if (typeof payload !== "string" || !payload) throw new Error("BC 无法导出当前地图");
     return payload;
   }
 
   function currentMapMetadata() {
+    const room = getChatRoomData();
     return {
-      sourceRoomName: clampText(globalThis.ChatRoomData?.Name, 120),
-      mapType: globalThis.ChatRoomData?.MapData?.Type,
+      sourceRoomName: clampText(room?.Name, 120),
+      mapType: room?.MapData?.Type,
     };
   }
 
@@ -43,7 +45,7 @@
 
   function createCurrentMapBackup(targetName) {
     const payload = exportCurrentNativeMap();
-    const roomName = clampText(globalThis.ChatRoomData?.Name, 60) || "当前房间";
+    const roomName = clampText(getChatRoomData()?.Name, 60) || "当前房间";
     return createMapRecord(payload, {
       name: `自动备份 · ${roomName} · ${localTimestamp(now())}`,
       note: `加载“${clampText(targetName, 80)}”前自动创建`,
@@ -54,7 +56,8 @@
 
   function applySavedMapToRoom(recordId) {
     assertRoomMapAction();
-    if (typeof globalThis.ChatRoomMapManager?.Map?.importString !== "function") throw new Error("当前 BC 版本缺少地图导入接口");
+    const manager = getChatRoomMapManager();
+    if (typeof manager?.Map?.importString !== "function") throw new Error("当前 BC 版本缺少地图导入接口");
     if (typeof globalThis.ChatRoomMapViewUpdateFlag !== "function") throw new Error("当前 BC 版本缺少地图同步接口");
     if (typeof globalThis.ChatRoomMapViewCalculatePerceptionMasks !== "function") throw new Error("当前 BC 版本缺少地图刷新接口");
     const record = findRecord(recordId);
@@ -65,7 +68,7 @@
 
     let imported = false;
     try {
-      imported = ChatRoomMapManager.Map.importString(record.payload) === true;
+      imported = manager.Map.importString(record.payload) === true;
     } catch (error) {
       warn("BC 地图导入器抛出异常", error);
     }

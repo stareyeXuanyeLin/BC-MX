@@ -1,6 +1,6 @@
   const MOD_NAME = "BCMapSaver";
   const FULL_NAME = "BC Map Saver";
-  const VERSION = "0.1.1";
+  const VERSION = "0.1.2";
   const STORAGE_SCHEMA_VERSION = 1;
   const RECORD_STORAGE_VERSION = 1;
   const MAP_FILE_FORMAT = "BC_MAP_SAVER_MAP";
@@ -58,6 +58,22 @@
     return `${STORAGE_PREFIX}:${Number.isInteger(member) ? member : "anonymous"}`;
   };
   const emptyLibrary = () => ({ schemaVersion: STORAGE_SCHEMA_VERSION, records: [] });
+
+  // Current BC declares some shared values with top-level let/const. Those bindings are
+  // visible by identifier to later scripts, but are intentionally absent from globalThis.
+  function getChatRoomData() {
+    try {
+      if (typeof ChatRoomData !== "undefined") return ChatRoomData;
+    } catch (_) { /* fall through to legacy window property */ }
+    return globalThis.ChatRoomData ?? null;
+  }
+
+  function getChatRoomMapManager() {
+    try {
+      if (typeof ChatRoomMapManager !== "undefined") return ChatRoomMapManager;
+    } catch (_) { /* fall through to legacy window property */ }
+    return globalThis.ChatRoomMapManager ?? null;
+  }
 
   function toast(message, kind = "info") {
     const host = document.getElementById(ROOT_ID) || document.body;
