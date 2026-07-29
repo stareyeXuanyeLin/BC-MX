@@ -5,7 +5,7 @@
 // @version      0.1.0
 // @description  Fetches and executes the latest BC Map Saver from the official branch with a privileged request and network fallback.
 // @description:zh-CN 每次进入页面时通过特权请求获取并执行 main 分支的最新 BC Map Saver，并在网络故障时自动切换备用源。
-// @author       凡尘 ＆ 佩菈
+// @author       林宣夜＆佩菈
 // @match        https://www.bondageprojects.com/R*/BondageClub*
 // @match        https://bondageprojects.com/R*/BondageClub*
 // @match        https://www.bondageprojects.elementfx.com/R*/BondageClub*

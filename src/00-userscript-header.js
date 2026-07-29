@@ -4,7 +4,7 @@
 // @namespace    https://github.com/stareyeXuanyeLin/BC-Map-Saver
 // @version      0.1.0
 // @description  在本地保存、导入、导出并重建 Bondage Club 聊天室地图。
-// @author       凡尘 ＆ 佩菈
+// @author       林宣夜＆佩菈
 // @match        https://www.bondageprojects.com/R*/*
 // @match        https://bondageprojects.com/R*/*
 // @match        https://www.bondageprojects.elementfx.com/R*/*
