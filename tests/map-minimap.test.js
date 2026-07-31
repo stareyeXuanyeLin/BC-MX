@@ -531,15 +531,20 @@ test("receive hooks mark hidden characters without touching game MapData", () =>
     const char = context.ChatRoomCharacter.find(c => c.MemberNumber === data.MemberNumber);
     if (char) char.MapData = data.MapData;
   };
-  context.ChatRoomSyncCharacter = data => {
-    const char = context.ChatRoomCharacter.find(c => c.MemberNumber === data.MemberNumber);
-    if (char) char.MapData = data.MapData;
+  // 模拟原版嵌套结构：角色数据在 Character 字段里，且同步后角色对象被重建
+  const syncCharacterData = data => {
+    const index = context.ChatRoomCharacter.findIndex(c => c.MemberNumber === data.Character.MemberNumber);
+    if (index >= 0) context.ChatRoomCharacter[index] = { ...context.ChatRoomCharacter[index], ...data.Character };
   };
+  context.ChatRoomSyncCharacter = syncCharacterData;
+  context.ChatRoomSyncSingle = syncCharacterData;
+  context.ChatRoomSyncMemberJoin = syncCharacterData;
   api.installHooksForTest(createModApi(context));
 
   const alice = context.ChatRoomCharacter[0];
   assert.equal(alice.BMSHidden, undefined);
 
+  // 实时位置更新（平铺结构 {MemberNumber, MapData}）
   context.ChatRoomMapViewSyncMapData({ MemberNumber: 111, MapData: { Pos: { X: 6, Y: 6 }, BMSHidden: true } });
   assert.equal(alice.BMSHidden, true);
   assert.deepEqual(plain(alice.MapData), { Pos: { X: 6, Y: 6 }, BMSHidden: true }); // 游戏数据保持原样，仅插件侧标记
@@ -548,10 +553,46 @@ test("receive hooks mark hidden characters without touching game MapData", () =>
   assert.equal(alice.BMSHidden, undefined);
   assert.deepEqual(plain(alice.MapData), { Pos: { X: 7, Y: 7 } });
 
-  // 进房/重同步路径同样生效
-  context.ChatRoomSyncCharacter({ MemberNumber: 222, MapData: { Pos: { X: 3, Y: 3 }, BMSHidden: true } });
+  // 进房同步（嵌套结构 {Character: {...}}，对象被重建后标记重新评估）
+  context.ChatRoomSyncCharacter({ Character: { MemberNumber: 111, MapData: { Pos: { X: 8, Y: 8 }, BMSHidden: true } } });
+  assert.equal(context.ChatRoomCharacter[0].BMSHidden, true);
+  assert.deepEqual(plain(context.ChatRoomCharacter[0].MapData), { Pos: { X: 8, Y: 8 }, BMSHidden: true });
+
+  // 单角色更新（嵌套结构）
+  context.ChatRoomSyncSingle({ Character: { MemberNumber: 222, MapData: { Pos: { X: 3, Y: 3 }, BMSHidden: true } } });
   assert.equal(context.ChatRoomCharacter[1].BMSHidden, true);
   assert.deepEqual(plain(context.ChatRoomCharacter[1].MapData), { Pos: { X: 3, Y: 3 }, BMSHidden: true });
+
+  // 成员加入（嵌套结构，无 MapData 的角色对象重建后不误标）
+  context.ChatRoomSyncMemberJoin({ Character: { MemberNumber: 333, MapData: { Pos: { X: 9, Y: 9 }, BMSHidden: true } } });
+  assert.equal(context.ChatRoomCharacter[2].BMSHidden, true);
+
+  // 重建后无标记 → 标记清除
+  context.ChatRoomSyncSingle({ Character: { MemberNumber: 222, MapData: { Pos: { X: 4, Y: 4 } } } });
+  assert.equal(context.ChatRoomCharacter[1].BMSHidden, undefined);
+});
+
+test("hidden player rebroadcasts marker after a member joins", async () => {
+  const sent = [];
+  const { api, context } = createRuntime({ ServerSend: (msg, data) => sent.push({ msg, data }) });
+  context.ChatRoomSyncMemberJoin = () => {};
+  api.installHooksForTest(createModApi(context));
+
+  api.setStealthEnabled(true);
+  sent.length = 0;
+  context.ChatRoomSyncMemberJoin({ Character: { MemberNumber: 444, MapData: null } });
+  assert.equal(sent.length, 0); // 延迟广播尚未触发
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].msg, "ChatRoomCharacterMapDataUpdate");
+  assert.equal(sent[0].data.BMSHidden, true);
+
+  // 未隐藏时不补发
+  api.setStealthEnabled(false);
+  sent.length = 0;
+  context.ChatRoomSyncMemberJoin({ Character: { MemberNumber: 555, MapData: null } });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert.equal(sent.length, 0);
 });
 
 test("isCharacterHidden: self never hidden, others follow marker", () => {

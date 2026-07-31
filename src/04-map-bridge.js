@@ -424,6 +424,16 @@
   }
 
   // 接收端：跟随每次 MapData 同步识别隐藏标记，仅维护插件侧状态。
+  // 注意消息结构差异：实时位置更新（ChatRoomSyncMapData）是平铺的 {MemberNumber, MapData}；
+  // 进房/重同步/成员加入（ChatRoomSyncCharacter/SyncSingle/MemberJoin）是嵌套的 {Character: {...}}，
+  // 且角色对象会被 CharacterLoadOnline 重建，必须每次同步都重新评估标记。
+  function applyStealthFromCharacterData(characterData) {
+    if (!characterData || typeof characterData !== "object") return;
+    const character = findRoomCharacter(characterData.MemberNumber);
+    if (!character || character === getPlayerCharacter()) return;
+    applyStealthMarker(character, characterData.MapData);
+  }
+
   function installStealthHooks() {
     if (typeof globalThis.ChatRoomMapViewSyncMapData === "function") {
       modApi.hookFunction("ChatRoomMapViewSyncMapData", 0, (args, next) => {
@@ -440,17 +450,38 @@
         return result;
       });
     }
-    if (typeof globalThis.ChatRoomSyncCharacter === "function") {
-      modApi.hookFunction("ChatRoomSyncCharacter", 0, (args, next) => {
+    for (const name of ["ChatRoomSyncCharacter", "ChatRoomSyncSingle", "ChatRoomSyncMemberJoin"]) {
+      if (typeof globalThis[name] !== "function") continue;
+      modApi.hookFunction(name, 0, (args, next) => {
         const result = next(args);
         try {
-          const data = args[0];
-          if (data && Number.isInteger(data?.MemberNumber)) {
-            const character = findRoomCharacter(data.MemberNumber);
-            if (character && character !== getPlayerCharacter()) applyStealthMarker(character, data.MapData);
-          }
+          applyStealthFromCharacterData(args[0]?.Character);
         } catch (error) {
-          warn("同步坐标隐藏标记失败", error);
+          warn(`同步坐标隐藏标记失败（${name}）`, error);
+        }
+        return result;
+      });
+    }
+    // 发送端兜底：有新成员加入房间时，隐藏玩家主动重广播一次带标记的 MapData，
+    // 确保新玩家在初始角色同步（服务器下发的数据可能被净化）后尽快恢复隐藏识别。
+    if (typeof globalThis.ChatRoomSyncMemberJoin === "function") {
+      modApi.hookFunction("ChatRoomSyncMemberJoin", 1000, (args, next) => {
+        const result = next(args);
+        try {
+          if (!isStealthEnabled()) return result;
+          const player = getPlayerCharacter();
+          if (!player?.MapData) return result;
+          const serverSend = getServerSend();
+          if (typeof serverSend !== "function") return result;
+          setTimeout(() => {
+            try {
+              serverSend("ChatRoomCharacterMapDataUpdate", player.MapData);
+            } catch (error) {
+              warn("进房后重广播隐藏标记失败", error);
+            }
+          }, 400);
+        } catch (error) {
+          warn("进房重广播隐藏标记失败", error);
         }
         return result;
       });
