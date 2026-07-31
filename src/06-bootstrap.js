@@ -87,6 +87,7 @@
       setLibrary: value => { library = normalizeLibrary(value); },
       setActiveStorageKey: value => { activeStorageKey = value; },
       shouldDrawEntryButton,
+      shouldDrawMinimapEntryButton,
       buildMapGridSnapshot,
       teleportCharacter,
       createTeleportMessage,
@@ -102,7 +103,7 @@
       teleportVerificationMessage,
       isTeleportMessageFor,
       installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); },
-      constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS },
+      constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS, ENTRY_BUTTON, MINIMAP_ENTRY_BUTTON },
     };
   } else {
     const timer = setInterval(() => {

@@ -290,6 +290,31 @@ test("native server send lookup resolves lexical ServerSend when present", () =>
   assert.equal(Object.prototype.hasOwnProperty.call(context, "ServerSend"), false);
 });
 
+test("minimap entry button uses canvas coordinates directly below the archive button", () => {
+  const { api, context } = createRuntime({
+    ChatRoomMapViewIsActive: () => true,
+    ChatRoomMapViewEditMode: "",
+  });
+  assert.equal(api.shouldDrawMinimapEntryButton(), true);
+  assert.equal(api.constants.MINIMAP_ENTRY_BUTTON.x, api.constants.ENTRY_BUTTON.x);
+  assert.equal(
+    api.constants.MINIMAP_ENTRY_BUTTON.y,
+    api.constants.ENTRY_BUTTON.y + api.constants.ENTRY_BUTTON.height + 10,
+  );
+
+  context.ChatRoomMapViewEditMode = "Tile";
+  assert.equal(api.shouldDrawMinimapEntryButton(), false);
+});
+
+test("minimap layout isolates the roster and canvas into explicit side-by-side grid columns", () => {
+  const minimapSource = fs.readFileSync(path.join(root, "src", "05-minimap.js"), "utf8");
+  assert.match(minimapSource, /display:grid!important;grid-template-columns:\$\{MINIMAP_SIDE_WIDTH\}px \$\{MINIMAP_CANVAS_SIZE\}px/);
+  assert.match(minimapSource, /canvas\{position:relative!important;inset:auto!important;/);
+  assert.match(minimapSource, /grid-column:2;grid-row:1/);
+  assert.match(minimapSource, /\.bms-mm-side\{position:relative!important;inset:auto!important;/);
+  assert.match(minimapSource, /grid-column:1;grid-row:1/);
+});
+
 test("event coordinates are scaled from CSS pixels to internal canvas pixels", () => {
   const { api } = createRuntime();
   const canvas = { width: 520, height: 520 };

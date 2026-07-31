@@ -2,7 +2,7 @@
 // @name         Bondage Club - Map Saver（核心脚本）
 // @name:zh-CN   Bondage Club - 地图存档（核心脚本）
 // @namespace    https://github.com/stareyeXuanyeLin/BC-Map-Saver
-// @version      0.2.0
+// @version      0.2.1
 // @description  在本地保存、导入、导出并重建 Bondage Club 聊天室地图。
 // @author       林宣夜＆佩菈
 // @match        https://www.bondageprojects.com/R*/*
@@ -27,7 +27,7 @@
 
   const MOD_NAME = "BCMapSaver";
   const FULL_NAME = "BC Map Saver";
-  const VERSION = "0.2.0";
+  const VERSION = "0.2.1";
   const STORAGE_SCHEMA_VERSION = 1;
   const RECORD_STORAGE_VERSION = 1;
   const MAP_FILE_FORMAT = "BC_MAP_SAVER_MAP";
@@ -758,8 +758,12 @@
   // 坐标换算按 canvas 内部像素 / CSS 像素比例进行，免疫全局样式或浏览器缩放造成的尺寸不一致。
 
   const MINIMAP_ID = "bms-minimap";
-  const MINIMAP_TOGGLE_ID = "bms-minimap-toggle";
-  const MINIMAP_TOGGLE_POS = Object.freeze({ x: 10, y: 570, width: 60, height: 60 }); // “档”按钮正下方（视觉上在下面，不重叠）
+  const MINIMAP_ENTRY_BUTTON = Object.freeze({
+    x: ENTRY_BUTTON.x,
+    y: ENTRY_BUTTON.y + ENTRY_BUTTON.height + 10,
+    width: ENTRY_BUTTON.width,
+    height: ENTRY_BUTTON.height,
+  });
   const MINIMAP_CANVAS_SIZE = 520;
   const MINIMAP_PANEL_WIDTH = 778;
   const MINIMAP_SIDE_WIDTH = 222;
@@ -799,8 +803,6 @@
     const style = document.createElement("style");
     style.id = "bms-minimap-style";
     style.textContent = `
-      #${MINIMAP_TOGGLE_ID}{position:fixed;left:${MINIMAP_TOGGLE_POS.x}px;top:${MINIMAP_TOGGLE_POS.y}px;z-index:99980;width:${MINIMAP_TOGGLE_POS.width}px;height:${MINIMAP_TOGGLE_POS.height}px;border:1px solid #4b6e98;border-radius:10px;background:#203858;color:#f2f7ff;font-size:18px;font-weight:700;cursor:pointer;font-family:Inter,"Microsoft YaHei",sans-serif;line-height:1}
-      #${MINIMAP_TOGGLE_ID}:hover{background:#2b4a72;border-color:#78a5d8}
       #${MINIMAP_ID}{position:fixed;left:50%;top:36px;z-index:99990;width:${MINIMAP_PANEL_WIDTH}px;background:#111d31;border:1px solid #45678f;border-radius:12px;box-shadow:0 18px 52px rgba(0,0,0,.6);font-family:Inter,"Microsoft YaHei",sans-serif;color:#eaf2ff;user-select:none;overflow:hidden}
       #${MINIMAP_ID} *{box-sizing:border-box}
       #${MINIMAP_ID} header{display:flex;align-items:center;gap:8px;padding:9px 12px;background:linear-gradient(135deg,#1b3151,#17243b);border-bottom:1px solid #385576;cursor:move;touch-action:none}
@@ -809,10 +811,10 @@
       #${MINIMAP_ID} .bms-mm-spacer{flex:1}
       #${MINIMAP_ID} header button{appearance:none;width:28px;height:28px;border:1px solid #4b6e98;border-radius:7px;background:#203858;color:#f2f7ff;font-size:15px;line-height:1;cursor:pointer;flex:none}
       #${MINIMAP_ID} header button:hover{background:#2b4a72;border-color:#78a5d8}
-      #${MINIMAP_ID} .bms-mm-body{display:flex;gap:12px;padding:10px 12px}
-      #${MINIMAP_ID} canvas{width:${MINIMAP_CANVAS_SIZE}px;height:${MINIMAP_CANVAS_SIZE}px;flex:none;background:#0b1220;border:1px solid #2c425d;border-radius:6px;cursor:grab;touch-action:none}
+      #${MINIMAP_ID} .bms-mm-body{display:grid!important;grid-template-columns:${MINIMAP_SIDE_WIDTH}px ${MINIMAP_CANVAS_SIZE}px;grid-template-rows:${MINIMAP_CANVAS_SIZE}px;align-items:stretch;gap:12px;padding:10px 12px}
+      #${MINIMAP_ID} canvas{position:relative!important;inset:auto!important;display:block!important;float:none!important;transform:none!important;margin:0!important;width:${MINIMAP_CANVAS_SIZE}px!important;height:${MINIMAP_CANVAS_SIZE}px!important;min-width:0;grid-column:2;grid-row:1;background:#0b1220;border:1px solid #2c425d;border-radius:6px;cursor:grab;touch-action:none}
       #${MINIMAP_ID} canvas.bms-mm-dragging{cursor:grabbing}
-      #${MINIMAP_ID} .bms-mm-side{width:${MINIMAP_SIDE_WIDTH}px;flex:none;display:flex;flex-direction:column;border:1px solid #2c425d;border-radius:6px;background:#0f1a2c;overflow:hidden}
+      #${MINIMAP_ID} .bms-mm-side{position:relative!important;inset:auto!important;float:none!important;transform:none!important;margin:0!important;width:${MINIMAP_SIDE_WIDTH}px!important;min-width:0;grid-column:1;grid-row:1;display:flex!important;flex-direction:column;border:1px solid #2c425d;border-radius:6px;background:#0f1a2c;overflow:hidden}
       #${MINIMAP_ID} .bms-mm-side-title{padding:8px 10px;font-size:12px;font-weight:700;color:#9eb4ce;border-bottom:1px solid #2c425d;background:#152238}
       #${MINIMAP_ID} .bms-mm-roster{list-style:none;margin:0;padding:6px;flex:1;overflow-y:auto;min-height:0}
       #${MINIMAP_ID} .bms-mm-roster li{display:flex;gap:8px;align-items:center;padding:7px 9px;border-radius:7px;cursor:pointer;font-size:13px;border:1px solid transparent}
@@ -843,29 +845,14 @@
       && ChatRoomMapViewIsActive();
   }
 
+  function shouldDrawMinimapEntryButton() {
+    return shouldShowMinimap() && globalThis.ChatRoomMapViewEditMode === "";
+  }
+
   function minimapTileStep() { return MINIMAP_TILE + MINIMAP_GAP; }
 
   function minimapGridPixelSize(grid) {
     return grid.width * MINIMAP_TILE + (grid.width - 1) * MINIMAP_GAP;
-  }
-
-  function ensureMinimapToggle() {
-    let button = document.getElementById(MINIMAP_TOGGLE_ID);
-    if (button) return button;
-    button = document.createElement("button");
-    button.id = MINIMAP_TOGGLE_ID;
-    button.title = "简化房间地图";
-    button.textContent = "图";
-    button.addEventListener("click", toggleMinimap);
-    document.body.appendChild(button);
-    return button;
-  }
-
-  function syncMinimapToggle() {
-    const button = document.getElementById(MINIMAP_TOGGLE_ID);
-    if (!button) return;
-    // 地图房内常驻显示（面板开着时也可点击关闭），非地图房隐藏
-    button.style.display = shouldShowMinimap() ? "" : "none";
   }
 
   function ensureMinimapRoot() {
@@ -1390,7 +1377,6 @@
     if (minimapOpen) return;
     minimapOpen = true;
     ensureMinimapRoot();
-    syncMinimapToggle();
     const room = getChatRoomData();
     const roomEl = document.querySelector(`#${MINIMAP_ID} .bms-mm-room`);
     if (roomEl) roomEl.textContent = room?.Name ? `房间：${room.Name}` : "";
@@ -1409,7 +1395,6 @@
     minimapDrag = null;
     if (manual) minimapAutoOpen = false;
     document.getElementById(MINIMAP_ID)?.remove();
-    syncMinimapToggle();
   }
 
   function toggleMinimap() {
@@ -1425,11 +1410,22 @@
       if (shouldShowMinimap()) {
         if (minimapAutoOpen && !minimapOpen) openMinimap();
         if (minimapOpen) minimapTick();
-        syncMinimapToggle();
+        if (shouldDrawMinimapEntryButton() && typeof globalThis.DrawButton === "function") {
+          DrawButton(MINIMAP_ENTRY_BUTTON.x, MINIMAP_ENTRY_BUTTON.y, MINIMAP_ENTRY_BUTTON.width, MINIMAP_ENTRY_BUTTON.height, "图", "#DDEBFF", "");
+        }
       } else if (minimapOpen) {
         closeMinimap();
       }
       return result;
+    });
+    modApi.hookFunction("ChatRoomClick", 1000, (args, next) => {
+      if (shouldDrawMinimapEntryButton()
+        && typeof globalThis.MouseIn === "function"
+        && MouseIn(MINIMAP_ENTRY_BUTTON.x, MINIMAP_ENTRY_BUTTON.y, MINIMAP_ENTRY_BUTTON.width, MINIMAP_ENTRY_BUTTON.height)) {
+        toggleMinimap();
+        return;
+      }
+      return next(args);
     });
     modApi.hookFunction("ChatRoomMapViewUpdateFlag", 0, (args, next) => {
       const result = next(args);
@@ -1806,6 +1802,7 @@
       setLibrary: value => { library = normalizeLibrary(value); },
       setActiveStorageKey: value => { activeStorageKey = value; },
       shouldDrawEntryButton,
+      shouldDrawMinimapEntryButton,
       buildMapGridSnapshot,
       teleportCharacter,
       createTeleportMessage,
@@ -1821,7 +1818,7 @@
       teleportVerificationMessage,
       isTeleportMessageFor,
       installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); },
-      constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS },
+      constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS, ENTRY_BUTTON, MINIMAP_ENTRY_BUTTON },
     };
   } else {
     const timer = setInterval(() => {
