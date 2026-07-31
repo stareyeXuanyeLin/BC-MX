@@ -366,3 +366,35 @@ test("receive boost only targets the exact hidden teleport message for the curre
   assert.equal(api.isTeleportMessageFor({ ...base, Content: "Other" }, 222), false);
   assert.equal(api.isTeleportMessageFor(null, 222), false);
 });
+
+test("swap plan exchanges both coordinates and keeps the original positions", () => {
+  const { api } = createRuntime();
+  const a = { MemberNumber: 111, MapData: { Pos: { X: 5, Y: 5 } } };
+  const b = { MemberNumber: 222, MapData: { Pos: { X: 10, Y: 10 } } };
+  assert.deepEqual(plain(api.buildSwapTeleportPlan(a, b)), [
+    { member: 111, x: 10, y: 10 },
+    { member: 222, x: 5, y: 5 },
+  ]);
+  // 第一次传送后 a 本地位置已变，计划仍使用交换前的原始坐标
+  const movedA = { MemberNumber: 111, MapData: { Pos: { X: 10, Y: 10 } } };
+  assert.deepEqual(plain(api.buildSwapTeleportPlan(movedA, b)), [
+    { member: 111, x: 10, y: 10 },
+    { member: 222, x: 10, y: 10 },
+  ]);
+});
+
+test("swap plan rejects characters without positions", () => {
+  const { api } = createRuntime();
+  assert.equal(api.buildSwapTeleportPlan({ MemberNumber: 111, MapData: null }, { MemberNumber: 222, MapData: { Pos: { X: 1, Y: 1 } } }), null);
+  assert.equal(api.buildSwapTeleportPlan(null, { MemberNumber: 222, MapData: { Pos: { X: 1, Y: 1 } } }), null);
+});
+
+test("reopening the minimap forces a roster redraw", () => {
+  const minimapSource = fs.readFileSync(path.join(root, "src", "05-minimap.js"), "utf8");
+  // 重开后必须重置玩家签名，否则 tick 因签名未变而跳过列表渲染（空列表 bug）
+  assert.match(minimapSource, /minimapPlayerSig = ""; \/\/ 重置签名/);
+  // 点击其他角色进入交换待确认（swapWith），不再直接切换选中
+  assert.match(minimapSource, /swapWith: character\.MemberNumber/);
+  assert.match(minimapSource, /data-mm-action="swap"/);
+  assert.match(minimapSource, /data-mm-action="switch-select"/);
+});
