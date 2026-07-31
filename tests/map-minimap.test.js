@@ -391,17 +391,22 @@ test("swap plan rejects missing positions and targets without an adjacent empty 
   assert.equal(api.buildSwapTeleportPlan(a, b, grid, [a, b]), null);
 });
 
-test("reopening the minimap redraws the roster and member clicks switch the unique selection", () => {
+test("reopening the minimap redraws the roster and only roster clicks switch selection", () => {
   const minimapSource = fs.readFileSync(path.join(root, "src", "05-minimap.js"), "utf8");
   // 重开后必须重置玩家签名，否则 tick 因签名未变而跳过列表渲染（空列表 bug）
   assert.match(minimapSource, /minimapPlayerSig = ""; \/\/ 重置签名/);
   // 打开时默认选中自己，成员列表恒有选中项
   assert.match(minimapSource, /minimapSelected = currentMemberNumber\(\); \/\/ 默认选中自己/);
-  // 点击任意可选成员必须直接切换唯一选中项，并清除上一成员的待确认落点
+  // 只有成员列表会切换唯一选中项，并清除上一成员的待确认落点
+  assert.match(minimapSource, /function minimapHandleRosterClick\(memberNumber\) \{\s*minimapSelectCharacter\(memberNumber\);\s*\}/);
   assert.match(minimapSource, /minimapSelected = memberNumber;\s*minimapPending = null;/);
-  assert.doesNotMatch(minimapSource, /swapWith: memberNumber/);
-  // 再次点击同一目标格子确认传送
-  assert.match(minimapSource, /再次点击同一目标格子 = 确认/);
+  assert.doesNotMatch(minimapSource, /minimapSelectCharacter\(character\.MemberNumber\)/);
+  assert.doesNotMatch(minimapSource, /data-mm-action="switch-select"/);
+  // 点击地图上的另一名玩家必须建立换位目标，不能切换选中玩家
+  assert.match(minimapSource, /swapWith: character\.MemberNumber/);
+  assert.match(minimapSource, /地图上的玩家标记不再切换选中/);
+  // 再次点击同一目标格子确认传送或换位
+  assert.match(minimapSource, /再次点击同一目标格子 = 确认（传送或交换）/);
   // 右键仅取消落点，不能把选中的其他成员强制切回自己
   assert.match(minimapSource, /\/\/ 右键只取消尚未确认的落点，当前选中成员保持不变。/);
   // 离开地图视角的成员在列表中明确标记为不可操作
