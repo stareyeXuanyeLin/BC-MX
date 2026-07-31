@@ -38,7 +38,7 @@
   let minimapDrag = null;
   let minimapPanelDrag = null;
   let minimapHover = null;
-  let minimapSelected = null; // 恒有选中：默认自己，点击玩家切换/交换待确认，异常兑底重置为自己
+  let minimapSelected = null; // 恒有选中：默认自己，点击任意可选成员后直接切换，异常时兜底重置为自己
   let minimapPending = null;
   let minimapFitted = false; // 打开后仅自动适配一次视图，之后保持用户视角
   let minimapPlayerSig = "";
@@ -69,11 +69,13 @@
       #${MINIMAP_ID} .bms-mm-roster li{display:flex;gap:8px;align-items:center;padding:7px 9px;border-radius:7px;cursor:pointer;font-size:13px;border:1px solid transparent}
       #${MINIMAP_ID} .bms-mm-roster li:hover{background:#1c3250}
       #${MINIMAP_ID} .bms-mm-roster li.bms-mm-selected{background:#2b4a72;border-color:#78a5d8}
+      #${MINIMAP_ID} .bms-mm-roster li.bms-mm-unavailable{cursor:not-allowed;opacity:.58}
       #${MINIMAP_ID} .bms-mm-dot{width:10px;height:10px;border-radius:50%;flex:none}
       #${MINIMAP_ID} .bms-mm-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       #${MINIMAP_ID} .bms-mm-pos{font-size:12px;color:#8fb3d8;font-family:Consolas,monospace}
       #${MINIMAP_ID} .bms-mm-me{font-size:11px;color:#ffd94d;border:1px solid #806a41;border-radius:999px;padding:0 6px}
       #${MINIMAP_ID} .bms-mm-hidden{font-size:11px;color:#ff9d9d;border:1px solid #7a4a26;border-radius:999px;padding:0 6px;flex:none}
+      #${MINIMAP_ID} .bms-mm-offmap{font-size:11px;color:#b7c2d0;border:1px solid #536276;border-radius:999px;padding:0 6px;flex:none}
       #${MINIMAP_ID} .bms-mm-stealth{display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid #2c425d;font-size:12px;color:#9eb4ce;cursor:pointer;user-select:none;flex:none}
       #${MINIMAP_ID} .bms-mm-stealth input{display:none}
       #${MINIMAP_ID} .bms-mm-slider{position:relative;width:36px;height:19px;border-radius:999px;background:#2a3d57;border:1px solid #45678f;transition:background .15s;flex:none}
@@ -287,7 +289,7 @@
     const list = getRoomCharacterList();
     return list
       .filter(c => !isCharacterHidden(c))
-      .map(c => `${c.MemberNumber}:${c.MapData.Pos.X},${c.MapData.Pos.Y}`).sort().join("|");
+      .map(c => `${c.MemberNumber}:${c.MapData.Pos.X},${c.MapData.Pos.Y}:${isCharacterMapViewActive(c) ? 1 : 0}`).sort().join("|");
   }
 
   function findRoomCharacterAt(gx, gy) {
@@ -405,43 +407,43 @@
       const isSelected = minimapSelected === character.MemberNumber;
       const name = character.Name ? String(character.Name) : `#${character.MemberNumber}`;
       const hidden = !isMe && isCharacterHidden(character);
-      return `<li data-member="${character.MemberNumber}" class="${isSelected ? "bms-mm-selected" : ""}${hidden ? " bms-mm-hidden-item" : ""}" title="${hidden ? "该玩家已隐藏坐标" : (admin ? "点击选中后传送" : "")}">
+      const mapActive = isCharacterMapViewActive(character);
+      const unavailable = hidden || !mapActive;
+      const title = hidden
+        ? "该玩家已隐藏坐标"
+        : !mapActive
+          ? "该玩家当前不在地图视角，不能选中、传送或交换位置"
+          : admin ? "点击选中后传送" : "";
+      return `<li data-member="${character.MemberNumber}" class="${isSelected ? "bms-mm-selected" : ""}${unavailable ? " bms-mm-unavailable" : ""}" title="${title}">
         <span class="bms-mm-dot" style="background:${isMe ? "#f5f9ff" : minimapPlayerColor(character)}"></span>
         <span class="bms-mm-name">${escapeHTML(name)}</span>
         ${hidden
           ? '<span class="bms-mm-hidden">🙈 隐藏中</span>'
-          : `<span class="bms-mm-pos">(${pos?.X ?? "-"}, ${pos?.Y ?? "-"})</span>`}
+          : !mapActive
+            ? '<span class="bms-mm-offmap">聊天中</span>'
+            : `<span class="bms-mm-pos">(${pos?.X ?? "-"}, ${pos?.Y ?? "-"})</span>`}
         ${isMe ? '<span class="bms-mm-me">我</span>' : ""}
       </li>`;
     }).join("") || '<li style="cursor:default;color:#7d93ad">房间内没有玩家</li>';
   }
 
-  // 点击玩家（canvas 或列表）：选中自己/清除目标，管理员点其他玩家进入交换待确认。
-  // 选中状态永不取消，只可能切换目标或清除待确认目标。
+  // 点击玩家（canvas 或列表）只切换唯一选中成员；移动目标始终由随后点击地图格子决定。
+  // 选中状态永不取消，切换成员时清除上一名成员尚未确认的落点。
   function minimapSelectCharacter(memberNumber) {
     if (minimapSwapInProgress) return;
     if (!isRoomAdmin() && memberNumber !== currentMemberNumber()) return; // 非管理员只能选中自己
-    if (minimapSelected == null) minimapSelected = currentMemberNumber(); // 兑底：总是有选中
     const target = findRoomCharacter(memberNumber);
+    if (!target) return;
     if (isCharacterHidden(target)) {
       toast("该玩家已隐藏坐标，无法选中或传送", "error");
       return;
     }
-    if (isRoomAdmin() && minimapSelected !== memberNumber) {
-      // 管理员点其他玩家：保持原选中，进入交换待确认（原三步换位交互）
-      const pos = target?.MapData?.Pos;
-      minimapPending = {
-        member: minimapSelected,
-        x: pos?.X ?? 0,
-        y: pos?.Y ?? 0,
-        walkable: true,
-        swapWith: memberNumber,
-      };
-    } else {
-      // 点自己或重复点击：保持选中，清除目标选择
-      minimapSelected = memberNumber;
-      minimapPending = null;
+    if (!isCharacterMapViewActive(target)) {
+      toast("该玩家当前不在地图视角，无法选中、传送或交换位置", "error");
+      return;
     }
+    minimapSelected = memberNumber;
+    minimapPending = null;
     renderMinimapStatus();
     renderMinimapRoster();
     drawMinimap();
@@ -632,6 +634,10 @@
       toast("目标玩家已不在房间", "error");
       return;
     }
+    if (!isCharacterMapViewActive(a) || !isCharacterMapViewActive(b)) {
+      toast("只有当前处于地图视角的玩家才能交换位置", "error");
+      return;
+    }
     const grid = minimapGrid ?? buildMapGridSnapshot();
     const plan = buildSwapTeleportPlan(a, b, grid, getRoomCharacterList());
     if (!plan) {
@@ -699,12 +705,8 @@
     if (minimapSwapInProgress) return;
     const canvas = event.currentTarget;
     if (event.button === 2) {
-      // 右键逐级回退：有格子目标先清除格子选择（选中保持）；无目标且选中其他玩家时取消选中，变回自己
-      if (minimapPending) {
-        minimapPending = null;
-      } else if (minimapSelected != null && minimapSelected !== currentMemberNumber()) {
-        minimapSelected = currentMemberNumber();
-      }
+      // 右键只取消尚未确认的落点，当前选中成员保持不变。
+      minimapPending = null;
       renderMinimapStatus();
       renderMinimapRoster();
       drawMinimap();
@@ -778,9 +780,12 @@
     }
     if (minimapSelected == null || !minimapGrid) return;
     const selected = findRoomCharacter(minimapSelected);
-    if (!selected) {
-      minimapSelected = currentMemberNumber(); // 目标不在房间：兑底选回自己
+    if (!selected || !isCharacterMapViewActive(selected)) {
+      minimapSelected = currentMemberNumber(); // 目标离开房间/地图视角：兜底选回自己
       minimapPending = null;
+      renderMinimapStatus();
+      renderMinimapRoster();
+      drawMinimap();
       return;
     }
     // 再次点击同一目标格子 = 确认（传送或交换）
@@ -825,8 +830,9 @@
     const sig = playerPositionSignature();
     if (sig !== minimapPlayerSig) {
       minimapPlayerSig = sig;
-      if (minimapSelected == null || isCharacterHidden(findRoomCharacter(minimapSelected))) {
-        minimapSelected = currentMemberNumber(); // 隐藏/失效目标：兑底选回自己
+      const selected = minimapSelected != null ? findRoomCharacter(minimapSelected) : null;
+      if (!selected || isCharacterHidden(selected) || !isCharacterMapViewActive(selected)) {
+        minimapSelected = currentMemberNumber(); // 隐藏、离开地图视角或失效：兜底选回自己
         minimapPending = null;
       }
       if (!minimapSwapInProgress) renderMinimapRoster();
@@ -902,7 +908,8 @@
         minimapGrid = null; // 房间属性替换：强制重建
         minimapDirty = true;
         minimapPlayerSig = ""; // 同步可能替换角色数据对象，强制下个 tick 重建名单
-        minimapSelected = currentMemberNumber(); // 房间属性替换：选中兑底回自己
+        const selected = minimapSelected != null ? findRoomCharacter(minimapSelected) : null;
+        if (!selected || isCharacterHidden(selected) || !isCharacterMapViewActive(selected)) minimapSelected = currentMemberNumber(); // 仅在原选中不可操作时兜底回自己
         minimapPending = null;
         minimapFitted = false; // 地图可能更换：重新适配视图
         return result;

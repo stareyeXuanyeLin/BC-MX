@@ -338,6 +338,7 @@
     }
     const target = findRoomCharacter(memberNumber);
     if (!target) throw new Error("找不到目标玩家");
+    if (!isCharacterMapViewActive(target)) throw new Error("目标玩家当前不在地图视角，无法传送");
     const position = { X: tx, Y: ty };
 
     if (!admin) {
@@ -365,10 +366,9 @@
     return "fallback";
   }
 
-  // ===== 坐标隐藏（捉迷藏） =====
-  // 插件层面隐藏：本地 Player.MapData 挂 BMSHidden 标记字段，随正常位置广播流转。
-  // 接收端验证器对未知字段原样保留，原版渲染只读 Pos/PrivateState，游戏协议零干预。
-  // 接收端仅在插件侧维护 character.BMSHidden，不改动 char.MapData。
+  // ===== 小地图状态同步 =====
+  // 坐标隐藏沿用 MapData.BMSHidden；地图视角状态写入原版允许扩展的 PrivateState，
+  // 随正常 MapData 广播流转。接收端仅在插件侧维护角色状态，原版渲染不读取这些标记。
 
   const STEALTH_STORAGE_PREFIX = "BC.MapSaver.stealth";
 
@@ -417,21 +417,68 @@
     return character.BMSHidden === true;
   }
 
+  function isLocalMapViewActive() {
+    if (globalThis.CurrentScreen !== "ChatRoom") return false;
+    try {
+      if (typeof ChatRoomMapViewIsActive === "function") return ChatRoomMapViewIsActive() === true;
+    } catch (_) { /* fall through to legacy window property */ }
+    return typeof globalThis.ChatRoomMapViewIsActive === "function" && globalThis.ChatRoomMapViewIsActive() === true;
+  }
+
+  // 自己读原版实时视图状态；远端玩家读取插件随 MapData 同步的状态标记。
+  // 未安装插件或尚未上报状态的玩家按“不在地图视角”处理，避免发出必然失败的传送。
+  function isCharacterMapViewActive(character) {
+    if (!character) return false;
+    if (Number(character.MemberNumber) === currentMemberNumber()) return isLocalMapViewActive();
+    return character.BMSMapViewActive === true;
+  }
+
   function applyStealthMarker(character, mapData) {
     if (!character) return;
     if (mapData?.BMSHidden === true) character.BMSHidden = true;
     else delete character.BMSHidden;
   }
 
+  function applyMapViewPresenceMarker(character, mapData) {
+    if (!character) return;
+    if (mapData?.PrivateState?.BMSMapViewActive === true) character.BMSMapViewActive = true;
+    else delete character.BMSMapViewActive;
+  }
+
+  function syncLocalMapViewPresence(force = false) {
+    const player = getPlayerCharacter();
+    if (!player?.MapData) return false;
+    const active = isLocalMapViewActive();
+    const privateState = player.MapData.PrivateState && typeof player.MapData.PrivateState === "object"
+      ? player.MapData.PrivateState
+      : (player.MapData.PrivateState = {});
+    const changed = (privateState.BMSMapViewActive === true) !== active;
+    if (active) privateState.BMSMapViewActive = true;
+    else delete privateState.BMSMapViewActive;
+    if (active) player.BMSMapViewActive = true;
+    else delete player.BMSMapViewActive;
+    if (!changed && !force) return true;
+    const serverSend = getServerSend();
+    if (typeof serverSend === "function") {
+      try {
+        serverSend("ChatRoomCharacterMapDataUpdate", player.MapData);
+      } catch (error) {
+        warn("广播地图视角状态失败", error);
+      }
+    }
+    return true;
+  }
+
   // 接收端：跟随每次 MapData 同步识别隐藏标记，仅维护插件侧状态。
   // 注意消息结构差异：实时位置更新（ChatRoomSyncMapData）是平铺的 {MemberNumber, MapData}；
   // 进房/重同步/成员加入（ChatRoomSyncCharacter/SyncSingle/MemberJoin）是嵌套的 {Character: {...}}，
   // 且角色对象会被 CharacterLoadOnline 重建，必须每次同步都重新评估标记。
-  function applyStealthFromCharacterData(characterData) {
+  function applyMapStateFromCharacterData(characterData) {
     if (!characterData || typeof characterData !== "object") return;
     const character = findRoomCharacter(characterData.MemberNumber);
     if (!character || character === getPlayerCharacter()) return;
     applyStealthMarker(character, characterData.MapData);
+    applyMapViewPresenceMarker(character, characterData.MapData);
   }
 
   function installStealthHooks() {
@@ -442,10 +489,13 @@
           const data = args[0];
           if (data && Number.isInteger(data?.MemberNumber)) {
             const character = findRoomCharacter(data.MemberNumber);
-            if (character && character !== getPlayerCharacter()) applyStealthMarker(character, data.MapData);
+            if (character && character !== getPlayerCharacter()) {
+              applyStealthMarker(character, data.MapData);
+              applyMapViewPresenceMarker(character, data.MapData);
+            }
           }
         } catch (error) {
-          warn("同步坐标隐藏标记失败", error);
+          warn("同步小地图状态标记失败", error);
         }
         return result;
       });
@@ -455,36 +505,37 @@
       modApi.hookFunction(name, 0, (args, next) => {
         const result = next(args);
         try {
-          applyStealthFromCharacterData(args[0]?.Character);
+          applyMapStateFromCharacterData(args[0]?.Character);
         } catch (error) {
-          warn(`同步坐标隐藏标记失败（${name}）`, error);
+          warn(`同步小地图状态标记失败（${name}）`, error);
         }
         return result;
       });
     }
-    // 发送端兜底：有新成员加入房间时，隐藏玩家主动重广播一次带标记的 MapData，
-    // 确保新玩家在初始角色同步（服务器下发的数据可能被净化）后尽快恢复隐藏识别。
+    // 本地切换聊天/地图视角后立即广播状态。ChatRoomActivateView 是统一切换入口，
+    // 比直接 Hook MapView.Activate/Deactivate 更可靠，因为原版视图表持有的是早期函数引用。
+    if (typeof globalThis.ChatRoomActivateView === "function") {
+      modApi.hookFunction("ChatRoomActivateView", 1000, (args, next) => {
+        const result = next(args);
+        try { syncLocalMapViewPresence(); } catch (error) { warn("同步地图视角切换失败", error); }
+        return result;
+      });
+    }
+    // 有新成员加入时主动重广播一次当前标记，弥补服务器初始角色同步可能净化扩展字段的问题。
     if (typeof globalThis.ChatRoomSyncMemberJoin === "function") {
       modApi.hookFunction("ChatRoomSyncMemberJoin", 1000, (args, next) => {
         const result = next(args);
         try {
-          if (!isStealthEnabled()) return result;
-          const player = getPlayerCharacter();
-          if (!player?.MapData) return result;
-          const serverSend = getServerSend();
-          if (typeof serverSend !== "function") return result;
+          if (!isStealthEnabled() && !isLocalMapViewActive()) return result;
           setTimeout(() => {
-            try {
-              serverSend("ChatRoomCharacterMapDataUpdate", player.MapData);
-            } catch (error) {
-              warn("进房后重广播隐藏标记失败", error);
-            }
+            try { syncLocalMapViewPresence(true); } catch (error) { warn("进房后重广播小地图状态失败", error); }
           }, 400);
         } catch (error) {
-          warn("进房重广播隐藏标记失败", error);
+          warn("进房重广播小地图状态失败", error);
         }
         return result;
       });
     }
+    syncLocalMapViewPresence();
   }
 
