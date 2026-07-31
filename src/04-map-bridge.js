@@ -212,6 +212,20 @@
   //   管理员 → Hidden 定向聊天消息 → 目标客户端 Player.Position setter → 正常同步链路广播。
   // 降级：手发与原版同构的 Hidden 消息（更旧版本接收端可能没有处理逻辑，UI 层需提示）。
 
+  function getChatRoomMapViewTeleport() {
+    try {
+      if (typeof ChatRoomMapViewTeleport === "function") return ChatRoomMapViewTeleport;
+    } catch (_) { /* fall through to legacy window property */ }
+    return globalThis.ChatRoomMapViewTeleport ?? null;
+  }
+
+  function getServerSend() {
+    try {
+      if (typeof ServerSend === "function") return ServerSend;
+    } catch (_) { /* fall through to legacy window property */ }
+    return globalThis.ServerSend ?? null;
+  }
+
   function createTeleportMessage(memberNumber, x, y) {
     return {
       Content: "ChatRoomMapViewTeleport",
@@ -233,13 +247,16 @@
     if (!target) throw new Error("找不到目标玩家");
     const position = { X: tx, Y: ty };
 
-    if (typeof globalThis.ChatRoomMapViewTeleport === "function") {
-      globalThis.ChatRoomMapViewTeleport(target, position);
+    const nativeTeleport = getChatRoomMapViewTeleport();
+    if (nativeTeleport) {
+      nativeTeleport(target, position);
       return "native";
     }
-    if (typeof globalThis.ServerSend !== "function") throw new Error("当前环境缺少 ServerSend，无法传送");
+    const serverSend = getServerSend();
+    if (!serverSend) throw new Error("当前环境缺少 ServerSend，无法传送");
     const player = getPlayerCharacter();
     if (target === player && target.Position) target.Position = position; // 对齐原版“传自己本地立即生效”语义
-    globalThis.ServerSend("ChatRoomChat", createTeleportMessage(memberNumber, tx, ty));
+    serverSend("ChatRoomChat", createTeleportMessage(memberNumber, tx, ty));
     return "fallback";
   }
+

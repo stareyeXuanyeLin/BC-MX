@@ -1,25 +1,28 @@
-  // ===== 小地图（第二功能模块） =====
-  // 独立 DOM canvas 浮窗：静态网格底图离屏缓存，玩家层动态重绘。
-  // 视口变换：滚轮缩放（鼠标锚点）+ 拖拽平移。管理员可选中玩家并传送到任意格子（穿墙语义）。
+  // ===== 简化房间地图（第二功能模块） =====
+  // 大号操作面板：色块渲染全图（可通行/墙壁/障碍），右侧玩家列表，管理员可选中玩家并传送到任意格子。
+  // 视口变换：滚轮缩放（鼠标锚点）+ 拖拽平移。坐标换算按 canvas 内部像素 / CSS 像素比例进行，
+  // 免疫全局样式或浏览器缩放造成的尺寸不一致。
 
   const MINIMAP_ID = "bms-minimap";
-  const MINIMAP_BUTTON = Object.freeze({ x: 940, y: 10, width: 50, height: 50 });
-  const MINIMAP_CANVAS_SIZE = 300;
-  const MINIMAP_TILE = 6;
+  const MINIMAP_TOGGLE_ID = "bms-minimap-toggle";
+  const MINIMAP_TOGGLE_POS = Object.freeze({ x: 10, y: 570, width: 60, height: 60 }); // “档”按钮正下方
+  const MINIMAP_CANVAS_SIZE = 520;
+  const MINIMAP_TILE = 12;
   const MINIMAP_GAP = 1;
   const MINIMAP_ZOOM_MIN = 0.5;
   const MINIMAP_ZOOM_MAX = 8;
   const MINIMAP_TICK_MS = 250;
   const MINIMAP_DRAG_THRESHOLD = 4;
+  const MINIMAP_VERIFY_DELAY_MS = 2500;
   const MINIMAP_PLAYER_COLORS = ["#e8a0c0", "#8fd0ff", "#a8d68f", "#ffd08f", "#d0a8ff", "#ff9d9d", "#9df0e0", "#f0e0a0"];
   const MINIMAP_TILE_COLORS = {
-    [TILE_KIND_EMPTY]: "#1b2230",
-    [TILE_KIND_FLOOR]: "#4b5a70",
-    [TILE_KIND_OUTDOOR]: "#4f5d43",
-    [TILE_KIND_WALL]: "#23272e",
-    [TILE_KIND_HALF_WALL]: "#5a4636",
-    [TILE_KIND_WATER]: "#3a6d8c",
-    [TILE_KIND_OTHER]: "#3a4150",
+    [TILE_KIND_EMPTY]: "#232a36",
+    [TILE_KIND_FLOOR]: "#b8a48c",
+    [TILE_KIND_OUTDOOR]: "#a3b98d",
+    [TILE_KIND_WALL]: "#6a5d52",
+    [TILE_KIND_HALF_WALL]: "#96826e",
+    [TILE_KIND_WATER]: "#7cb3d4",
+    [TILE_KIND_OTHER]: "#8a8f98",
   };
 
   let minimapOpen = false;
@@ -39,22 +42,37 @@
     const style = document.createElement("style");
     style.id = "bms-minimap-style";
     style.textContent = `
-      #${MINIMAP_ID}{position:fixed;left:648px;top:48px;z-index:99990;width:352px;background:#111d31;border:1px solid #45678f;border-radius:12px;box-shadow:0 16px 46px rgba(0,0,0,.5);font-family:Inter,"Microsoft YaHei",sans-serif;color:#eaf2ff;user-select:none;overflow:hidden}
+      #${MINIMAP_TOGGLE_ID}{position:fixed;left:${MINIMAP_TOGGLE_POS.x}px;top:${MINIMAP_TOGGLE_POS.y}px;z-index:99980;width:${MINIMAP_TOGGLE_POS.width}px;height:${MINIMAP_TOGGLE_POS.height}px;border:1px solid #4b6e98;border-radius:10px;background:#203858;color:#f2f7ff;font-size:18px;font-weight:700;cursor:pointer;font-family:Inter,"Microsoft YaHei",sans-serif;line-height:1}
+      #${MINIMAP_TOGGLE_ID}:hover{background:#2b4a72;border-color:#78a5d8}
+      #${MINIMAP_ID}{position:fixed;left:50%;top:36px;transform:translateX(-50%);z-index:99990;width:806px;background:#111d31;border:1px solid #45678f;border-radius:12px;box-shadow:0 18px 52px rgba(0,0,0,.6);font-family:Inter,"Microsoft YaHei",sans-serif;color:#eaf2ff;user-select:none;overflow:hidden}
       #${MINIMAP_ID} *{box-sizing:border-box}
-      #${MINIMAP_ID} header{display:flex;align-items:center;gap:6px;padding:8px 10px;background:linear-gradient(135deg,#1b3151,#17243b);border-bottom:1px solid #385576}
-      #${MINIMAP_ID} .bms-mm-title{font-size:14px;font-weight:700;letter-spacing:.03em}
+      #${MINIMAP_ID} header{display:flex;align-items:center;gap:8px;padding:9px 12px;background:linear-gradient(135deg,#1b3151,#17243b);border-bottom:1px solid #385576}
+      #${MINIMAP_ID} .bms-mm-title{font-size:15px;font-weight:750;letter-spacing:.03em}
+      #${MINIMAP_ID} .bms-mm-room{font-size:12px;color:#9eb4ce;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       #${MINIMAP_ID} .bms-mm-spacer{flex:1}
-      #${MINIMAP_ID} header button{appearance:none;width:26px;height:26px;border:1px solid #4b6e98;border-radius:7px;background:#203858;color:#f2f7ff;font-size:14px;line-height:1;cursor:pointer}
+      #${MINIMAP_ID} header button{appearance:none;width:28px;height:28px;border:1px solid #4b6e98;border-radius:7px;background:#203858;color:#f2f7ff;font-size:15px;line-height:1;cursor:pointer}
       #${MINIMAP_ID} header button:hover{background:#2b4a72;border-color:#78a5d8}
-      #${MINIMAP_ID} canvas{display:block;margin:10px auto 6px;background:#0b1220;border:1px solid #2c425d;border-radius:6px;cursor:grab;touch-action:none}
+      #${MINIMAP_ID} .bms-mm-body{display:flex;gap:12px;padding:10px 12px}
+      #${MINIMAP_ID} canvas{width:${MINIMAP_CANVAS_SIZE}px;height:${MINIMAP_CANVAS_SIZE}px;flex:none;background:#0b1220;border:1px solid #2c425d;border-radius:6px;cursor:grab;touch-action:none}
       #${MINIMAP_ID} canvas.bms-mm-dragging{cursor:grabbing}
-      #${MINIMAP_ID} footer{padding:0 10px 10px;min-height:44px}
+      #${MINIMAP_ID} .bms-mm-side{flex:1;display:flex;flex-direction:column;min-width:0;border:1px solid #2c425d;border-radius:6px;background:#0f1a2c;overflow:hidden}
+      #${MINIMAP_ID} .bms-mm-side-title{padding:8px 10px;font-size:12px;font-weight:700;color:#9eb4ce;border-bottom:1px solid #2c425d;background:#152238}
+      #${MINIMAP_ID} .bms-mm-roster{list-style:none;margin:0;padding:6px;flex:1;overflow-y:auto;min-height:0}
+      #${MINIMAP_ID} .bms-mm-roster li{display:flex;gap:8px;align-items:center;padding:7px 9px;border-radius:7px;cursor:pointer;font-size:13px;border:1px solid transparent}
+      #${MINIMAP_ID} .bms-mm-roster li:hover{background:#1c3250}
+      #${MINIMAP_ID} .bms-mm-roster li.bms-mm-selected{background:#2b4a72;border-color:#78a5d8}
+      #${MINIMAP_ID} .bms-mm-dot{width:10px;height:10px;border-radius:50%;flex:none}
+      #${MINIMAP_ID} .bms-mm-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #${MINIMAP_ID} .bms-mm-pos{font-size:12px;color:#8fb3d8;font-family:Consolas,monospace}
+      #${MINIMAP_ID} .bms-mm-me{font-size:11px;color:#ffd94d;border:1px solid #806a41;border-radius:999px;padding:0 6px}
+      #${MINIMAP_ID} .bms-mm-hint{padding:8px 10px;font-size:11px;color:#7d93ad;line-height:1.7;border-top:1px solid #2c425d}
+      #${MINIMAP_ID} footer{padding:0 12px 12px;min-height:50px}
       .bms-mm-status{font-size:12px;color:#a8bdd5;line-height:1.7}
       .bms-mm-status strong{color:#8fd0ff}
       .bms-mm-status .bms-mm-warn{color:#ffc981}
       .bms-mm-status .bms-mm-bad{color:#ff9d9d}
       .bms-mm-actions{display:flex;gap:6px;margin-top:5px}
-      .bms-mm-actions button{appearance:none;border:1px solid #4b6e98;border-radius:7px;background:#203858;color:#f2f7ff;padding:5px 12px;font-size:12px;cursor:pointer}
+      .bms-mm-actions button{appearance:none;border:1px solid #4b6e98;border-radius:7px;background:#203858;color:#f2f7ff;padding:6px 14px;font-size:13px;cursor:pointer}
       .bms-mm-actions button.bms-mm-confirm{background:#2966a3;border-color:#4d94d5}
       .bms-mm-actions button.bms-mm-confirm-warn{background:#7a4a26;border-color:#c98a4a}
     `;
@@ -74,6 +92,24 @@
     return grid.width * MINIMAP_TILE + (grid.width - 1) * MINIMAP_GAP;
   }
 
+  function ensureMinimapToggle() {
+    let button = document.getElementById(MINIMAP_TOGGLE_ID);
+    if (button) return button;
+    button = document.createElement("button");
+    button.id = MINIMAP_TOGGLE_ID;
+    button.title = "简化房间地图";
+    button.textContent = "图";
+    button.addEventListener("click", toggleMinimap);
+    document.body.appendChild(button);
+    return button;
+  }
+
+  function syncMinimapToggle() {
+    const button = document.getElementById(MINIMAP_TOGGLE_ID);
+    if (!button) return;
+    button.style.display = shouldShowMinimap() && !minimapOpen ? "" : "none";
+  }
+
   function ensureMinimapRoot() {
     let root = document.getElementById(MINIMAP_ID);
     if (root) return root;
@@ -81,14 +117,22 @@
     root.id = MINIMAP_ID;
     root.innerHTML = `
       <header>
-        <span class="bms-mm-title">小地图</span>
+        <span class="bms-mm-title">简化房间地图</span>
+        <span class="bms-mm-room"></span>
         <span class="bms-mm-spacer"></span>
-        <button data-mm="zoomIn" title="放大">+</button>
         <button data-mm="zoomOut" title="缩小">−</button>
+        <button data-mm="zoomIn" title="放大">＋</button>
         <button data-mm="fit" title="复位">⤢</button>
         <button data-mm="close" title="关闭">×</button>
       </header>
-      <canvas width="${MINIMAP_CANVAS_SIZE}" height="${MINIMAP_CANVAS_SIZE}"></canvas>
+      <div class="bms-mm-body">
+        <canvas width="${MINIMAP_CANVAS_SIZE}" height="${MINIMAP_CANVAS_SIZE}"></canvas>
+        <aside class="bms-mm-side">
+          <div class="bms-mm-side-title">房间成员</div>
+          <ul class="bms-mm-roster"></ul>
+          <div class="bms-mm-hint">滚动缩放 · 拖拽平移 · 点击玩家选中<br>点击格子选择传送目标</div>
+        </aside>
+      </div>
       <footer class="bms-mm-status"></footer>`;
     document.body.appendChild(root);
 
@@ -108,13 +152,19 @@
       else if (action === "fit") fitMinimapView();
       else if (action === "close") closeMinimap(true);
     });
+
+    root.querySelector(".bms-mm-roster").addEventListener("click", event => {
+      const item = event.target.closest?.("[data-member]");
+      if (!item) return;
+      minimapHandleRosterClick(Number(item.dataset.member));
+    });
     return root;
   }
 
   function fitMinimapView() {
     if (!minimapGrid) return;
     const size = minimapGridPixelSize(minimapGrid);
-    const zoom = Math.min(MINIMAP_CANVAS_SIZE / size, MINIMAP_CANVAS_SIZE / size) * 0.96;
+    const zoom = (MINIMAP_CANVAS_SIZE / size) * 0.96;
     minimapView = {
       zoom: Math.max(MINIMAP_ZOOM_MIN, Math.min(MINIMAP_ZOOM_MAX, zoom)),
       panX: (MINIMAP_CANVAS_SIZE - size * zoom) / 2,
@@ -131,10 +181,20 @@
     drawMinimap();
   }
 
+  // 事件坐标 → canvas 内部像素坐标（比例换算，免疫 CSS 尺寸与属性尺寸不一致）
+  function minimapEventToCanvasXY(canvas, rect, clientX, clientY) {
+    const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  }
+
   function minimapCanvasToGrid(mx, my) {
     if (!minimapGrid) return null;
-    const gx = Math.floor((mx - minimapView.panX) / minimapView.zoom / minimapTileStep());
-    const gy = Math.floor((my - minimapView.panY) / minimapView.zoom / minimapTileStep());
+    const gx = Math.floor(mx / minimapView.zoom / minimapTileStep());
+    const gy = Math.floor(my / minimapView.zoom / minimapTileStep());
     if (gx < 0 || gy < 0 || gx >= minimapGrid.width || gy >= minimapGrid.height) return null;
     return { x: gx, y: gy };
   }
@@ -160,12 +220,12 @@
         ctx.fillStyle = MINIMAP_TILE_COLORS[minimapGrid.tileKind[index]] ?? MINIMAP_TILE_COLORS[TILE_KIND_EMPTY];
         ctx.fillRect(x * step, y * step, MINIMAP_TILE, MINIMAP_TILE);
         if (minimapGrid.walkable[index] !== 1) {
-          ctx.fillStyle = "rgba(0,0,0,0.55)";
+          ctx.fillStyle = "rgba(0,0,0,0.45)";
           ctx.fillRect(x * step, y * step, MINIMAP_TILE, MINIMAP_TILE);
         }
       }
     }
-    ctx.strokeStyle = "rgba(0,0,0,0.30)";
+    ctx.strokeStyle = "rgba(0,0,0,0.18)";
     ctx.lineWidth = 1;
     for (let x = 0; x <= minimapGrid.width; x++) {
       ctx.beginPath();
@@ -204,7 +264,6 @@
     if (minimapBgCanvas) ctx.drawImage(minimapBgCanvas, minimapView.panX, minimapView.panY, minimapBgCanvas.width * minimapView.zoom, minimapBgCanvas.height * minimapView.zoom);
 
     const step = minimapTileStep() * minimapView.zoom;
-    const tilePx = MINIMAP_TILE * minimapView.zoom;
 
     // Hover 高亮
     if (minimapHover) {
@@ -216,9 +275,9 @@
     // 待确认传送目标
     if (minimapPending) {
       const p = minimapGridToCanvas(minimapPending.x, minimapPending.y);
-      ctx.fillStyle = minimapPending.walkable ? "rgba(90,210,120,0.30)" : "rgba(255,110,110,0.32)";
+      ctx.fillStyle = minimapPending.walkable ? "rgba(60,180,90,0.30)" : "rgba(255,110,110,0.32)";
       ctx.fillRect(p.x, p.y, step, step);
-      ctx.strokeStyle = minimapPending.walkable ? "#5ad278" : "#ff6e6e";
+      ctx.strokeStyle = minimapPending.walkable ? "#3cb45a" : "#ff6e6e";
       ctx.lineWidth = 2;
       ctx.strokeRect(p.x + 1, p.y + 1, step - 2, step - 2);
     }
@@ -245,38 +304,74 @@
       const pos = character.MapData?.Pos;
       if (!pos) continue;
       const p = minimapGridToCanvas(pos.X, pos.Y);
-      const radius = Math.max(2.5, Math.min(7, tilePx * 0.34));
+      const radius = Math.max(3, Math.min(8, MINIMAP_TILE * minimapView.zoom * 0.34));
       const isMe = character.MemberNumber === myNumber;
       const isSelected = minimapSelected === character.MemberNumber;
       ctx.beginPath();
       ctx.arc(p.x + step / 2, p.y + step / 2, radius, 0, Math.PI * 2);
       ctx.fillStyle = isMe ? "#f5f9ff" : minimapPlayerColor(character.MemberNumber);
       ctx.fill();
-      ctx.lineWidth = isSelected ? 2.5 : 1.2;
-      ctx.strokeStyle = isSelected ? "#ffd94d" : isMe ? "#4d94d5" : "rgba(10,15,25,0.8)";
+      ctx.lineWidth = isSelected ? 3 : 1.4;
+      ctx.strokeStyle = isSelected ? "#ffd94d" : isMe ? "#4d94d5" : "rgba(10,15,25,0.85)";
       ctx.stroke();
       // 自己头顶标记
       if (isMe) {
         ctx.beginPath();
-        ctx.arc(p.x + step / 2, p.y + step / 2 - radius - 2, 2, 0, Math.PI * 2);
+        ctx.arc(p.x + step / 2, p.y + step / 2 - radius - 3, 2.5, 0, Math.PI * 2);
         ctx.fillStyle = "#8fd0ff";
         ctx.fill();
       }
       // hover 名字
       if (minimapHover && pos.X === minimapHover.x && pos.Y === minimapHover.y) {
         const name = character.Name ? String(character.Name) : `#${character.MemberNumber}`;
-        ctx.font = "11px Inter, 'Microsoft YaHei', sans-serif";
-        const width = ctx.measureText(name).width + 10;
+        ctx.font = "12px Inter, 'Microsoft YaHei', sans-serif";
+        const width = ctx.measureText(name).width + 12;
         const bx = Math.max(0, Math.min(MINIMAP_CANVAS_SIZE - width, p.x + step / 2 - width / 2));
-        const by = Math.max(0, p.y + step / 2 - radius - 20);
-        ctx.fillStyle = "rgba(10,16,28,0.85)";
-        ctx.fillRect(bx, by, width, 17);
+        const by = Math.max(0, p.y + step / 2 - radius - 22);
+        ctx.fillStyle = "rgba(10,16,28,0.88)";
+        ctx.fillRect(bx, by, width, 18);
         ctx.strokeStyle = "rgba(120,160,210,0.6)";
-        ctx.strokeRect(bx, by, width, 17);
+        ctx.strokeRect(bx, by, width, 18);
         ctx.fillStyle = isMe ? "#8fd0ff" : "#eaf2ff";
-        ctx.fillText(name, bx + 5, by + 13);
+        ctx.fillText(name, bx + 6, by + 14);
       }
     }
+  }
+
+  function renderMinimapRoster() {
+    const root = document.getElementById(MINIMAP_ID);
+    if (!root) return;
+    const listEl = root.querySelector(".bms-mm-roster");
+    if (!listEl) return;
+    const list = getRoomCharacterList();
+    const myNumber = currentMemberNumber();
+    const admin = isRoomAdmin();
+    listEl.innerHTML = list.map(character => {
+      const pos = character.MapData?.Pos;
+      const isMe = character.MemberNumber === myNumber;
+      const isSelected = minimapSelected === character.MemberNumber;
+      const name = character.Name ? String(character.Name) : `#${character.MemberNumber}`;
+      return `<li data-member="${character.MemberNumber}" class="${isSelected ? "bms-mm-selected" : ""}" title="${admin ? "点击选中后传送" : ""}">
+        <span class="bms-mm-dot" style="background:${isMe ? "#f5f9ff" : minimapPlayerColor(character.MemberNumber)}"></span>
+        <span class="bms-mm-name">${escapeHTML(name)}</span>
+        <span class="bms-mm-pos">(${pos?.X ?? "-"}, ${pos?.Y ?? "-"})</span>
+        ${isMe ? '<span class="bms-mm-me">我</span>' : ""}
+      </li>`;
+    }).join("") || '<li style="cursor:default;color:#7d93ad">房间内没有玩家</li>';
+  }
+
+  function minimapHandleRosterClick(memberNumber) {
+    if (!isRoomAdmin()) return;
+    if (minimapSelected === memberNumber) {
+      minimapSelected = null;
+      minimapPending = null;
+    } else {
+      minimapSelected = memberNumber;
+      minimapPending = null;
+    }
+    renderMinimapStatus();
+    renderMinimapRoster();
+    drawMinimap();
   }
 
   function renderMinimapStatus() {
@@ -298,45 +393,95 @@
       const target = findRoomCharacter(minimapSelected);
       if (target) {
         const name = target.Name ? String(target.Name) : `#${minimapSelected}`;
-        html = `<div class="bms-mm-status">已选中 <strong>${escapeHTML(name)}</strong> (${target.MapData?.Pos?.X}, ${target.MapData?.Pos?.Y})，点击目标格子传送；右键或再次点击取消。</div>
+        html = `<div class="bms-mm-status">已选中 <strong>${escapeHTML(name)}</strong> (${target.MapData?.Pos?.X}, ${target.MapData?.Pos?.Y})，点击地图选择目标格子；右键或再次点击取消。</div>
           <div class="bms-mm-actions"><button data-mm-action="cancel">取消选中</button></div>`;
       }
     } else if (admin) {
-      html = `<div class="bms-mm-status">点击玩家选中后可将其传送至任意格子（穿墙）。滚动缩放，拖拽平移。</div>`;
+      html = `<div class="bms-mm-status">点击玩家（地图或列表）选中，然后点击目标格子传送（穿墙）。滚动缩放，拖拽平移。</div>`;
     } else {
       html = `<div class="bms-mm-status">只读概览：滚动缩放，拖拽平移。</div>`;
     }
     footer.innerHTML = html;
-    const confirmButton = footer.querySelector('[data-mm-action="confirm"]');
-    confirmButton?.addEventListener("click", () => {
-      try {
-        if (!minimapPending) return;
-        const { member, x, y } = minimapPending;
-        teleportCharacter(member, x, y);
-        toast("传送指令已发出", "success");
-      } catch (error) {
-        toast(error.message, "error");
-      } finally {
-        minimapPending = null;
-        minimapSelected = null;
-        renderMinimapStatus();
-        drawMinimap();
-      }
+    footer.querySelector('[data-mm-action="confirm"]')?.addEventListener("click", () => {
+      if (!minimapPending) return;
+      const { member, x, y } = minimapPending;
+      minimapPending = null;
+      minimapSelected = null;
+      renderMinimapStatus();
+      renderMinimapRoster();
+      drawMinimap();
+      teleportWithVerify(member, x, y);
     });
     footer.querySelector('[data-mm-action="cancel"]')?.addEventListener("click", () => {
       minimapPending = null;
       minimapSelected = null;
       renderMinimapStatus();
+      renderMinimapRoster();
       drawMinimap();
     });
   }
 
+  // 传送结果校验（纯逻辑）：目标仍在房间且位置已变为目标坐标才算成功
+  function teleportVerificationMessage(target, x, y) {
+    if (!target) return "目标已不在房间，传送可能未生效";
+    const pos = target.MapData?.Pos;
+    if (!pos || pos.X !== x || pos.Y !== y) return "传送未生效：目标未在地图视图或客户端版本过旧（位置未变化）";
+    return "传送成功：目标位置已更新";
+  }
+
+  // 判断一条 Hidden 消息是否为“发给当前玩家”的原版传送指令
+  function isTeleportMessageFor(data, memberNumber) {
+    return !!data
+      && data.Type === "Hidden"
+      && data.Content === "ChatRoomMapViewTeleport"
+      && Number(data.Target) === Number(memberNumber);
+  }
+
+  // 接收端增强：原版 ChatRoomMapViewTeleport 只更新本地 MapData.Pos，真正的广播由
+  // ChatRoomMapViewUpdatePlayerSync 在地图视图运行循环里消费标志后发送。目标玩家停在
+  // 聊天视图时标志无人消费，位置不生效。这里在原版处理完成后强制广播一次（幂等）。
+  function installTeleportReceiveBoost() {
+    modApi.hookFunction("ChatRoomMessage", 1000, (args, next) => {
+      const data = args[0];
+      const result = next(args);
+      try {
+        if (isTeleportMessageFor(data, currentMemberNumber())) {
+          const serverSend = getServerSend();
+          const player = getPlayerCharacter();
+          if (serverSend && player?.MapData) serverSend("ChatRoomCharacterMapDataUpdate", player.MapData);
+        }
+      } catch (error) {
+        warn("传送后强制同步失败", error);
+      }
+      return result;
+    });
+  }
+
+  function teleportWithVerify(member, x, y) {
+    let mode;
+    try {
+      mode = teleportCharacter(member, x, y);
+    } catch (error) {
+      toast(error.message, "error");
+      return;
+    }
+    if (member === currentMemberNumber()) {
+      toast("已传送到目标位置", "success");
+      return;
+    }
+    toast(`传送指令已发出（${mode === "native" ? "原生接口" : "兼容消息"}），等待目标同步…`, "success");
+    setTimeout(() => {
+      const target = findRoomCharacter(member);
+      toast(teleportVerificationMessage(target, x, y), target ? "success" : "error");
+    }, MINIMAP_VERIFY_DELAY_MS);
+  }
+
   function minimapHandleWheel(event) {
     event.preventDefault();
-    const rect = event.currentTarget.getBoundingClientRect();
-    const mx = event.clientX - rect.left;
-    const my = event.clientY - rect.top;
-    minimapZoomAt(mx, my, event.deltaY < 0 ? 1.18 : 1 / 1.18);
+    const canvas = event.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    const pos = minimapEventToCanvasXY(canvas, rect, event.clientX, event.clientY);
+    minimapZoomAt(pos.x, pos.y, event.deltaY < 0 ? 1.18 : 1 / 1.18);
   }
 
   function minimapHandlePointerDown(event) {
@@ -345,6 +490,7 @@
       minimapSelected = null;
       minimapPending = null;
       renderMinimapStatus();
+      renderMinimapRoster();
       drawMinimap();
       return;
     }
@@ -357,14 +503,9 @@
   function minimapHandlePointerMove(event) {
     const canvas = event.currentTarget;
     const rect = canvas.getBoundingClientRect();
-    const mx = event.clientX - rect.left;
-    const my = event.clientY - rect.top;
-    const grid = minimapCanvasToGrid(mx, my);
-    if (grid) {
-      minimapHover = grid;
-    } else {
-      minimapHover = null;
-    }
+    const pos = minimapEventToCanvasXY(canvas, rect, event.clientX, event.clientY);
+    const grid = minimapCanvasToGrid(pos.x, pos.y);
+    minimapHover = grid;
     if (minimapDrag && minimapDrag.pointerId === event.pointerId) {
       const dx = event.clientX - minimapDrag.startX;
       const dy = event.clientY - minimapDrag.startY;
@@ -373,18 +514,18 @@
       minimapView.panY = minimapDrag.panY + dy;
     }
     drawMinimap();
-    if (!minimapDrag?.moved && grid) renderMinimapHoverStatus();
+    if (!minimapDrag?.moved && grid) renderMinimapHoverStatus(grid);
   }
 
-  function renderMinimapHoverStatus() {
+  function renderMinimapHoverStatus(grid) {
     if (minimapPending || minimapSelected != null) return;
     const root = document.getElementById(MINIMAP_ID);
-    if (!root || !minimapHover) return;
-    const character = findRoomCharacterAt(minimapHover.x, minimapHover.y);
-    const walkable = minimapGrid?.walkable[minimapHover.y * minimapGrid.width + minimapHover.x] === 1;
+    if (!root) return;
+    const character = findRoomCharacterAt(grid.x, grid.y);
+    const walkable = minimapGrid?.walkable[grid.y * minimapGrid.width + grid.x] === 1;
     const text = character
-      ? `格子 (${minimapHover.x}, ${minimapHover.y})：${escapeHTML(character.Name ? String(character.Name) : `#${character.MemberNumber}`)}`
-      : `格子 (${minimapHover.x}, ${minimapHover.y})：${walkable ? "可站人" : '<span class="bms-mm-bad">不可站人</span>'}`;
+      ? `格子 (${grid.x}, ${grid.y})：${escapeHTML(character.Name ? String(character.Name) : `#${character.MemberNumber}`)}`
+      : `格子 (${grid.x}, ${grid.y})：${walkable ? "可站人" : '<span class="bms-mm-bad">不可站人</span>'}`;
     root.querySelector("footer").innerHTML = `<div class="bms-mm-status">${text}</div>`;
   }
 
@@ -396,7 +537,8 @@
     minimapDrag = null;
     if (wasDrag) return;
     const rect = canvas.getBoundingClientRect();
-    const grid = minimapCanvasToGrid(event.clientX - rect.left, event.clientY - rect.top);
+    const pos = minimapEventToCanvasXY(canvas, rect, event.clientX, event.clientY);
+    const grid = minimapCanvasToGrid(pos.x, pos.y);
     if (!grid) return;
     minimapHandleClick(grid.x, grid.y);
   }
@@ -413,6 +555,7 @@
         minimapPending = null;
       }
       renderMinimapStatus();
+      renderMinimapRoster();
       drawMinimap();
       return;
     }
@@ -427,6 +570,7 @@
       minimapSelected = null;
       minimapPending = null;
       renderMinimapStatus();
+      renderMinimapRoster();
       drawMinimap();
       return;
     }
@@ -455,6 +599,7 @@
     const sig = playerPositionSignature();
     if (sig !== minimapPlayerSig) {
       minimapPlayerSig = sig;
+      renderMinimapRoster();
       drawMinimap();
     }
   }
@@ -463,6 +608,10 @@
     if (minimapOpen) return;
     minimapOpen = true;
     ensureMinimapRoot();
+    syncMinimapToggle();
+    const room = getChatRoomData();
+    const roomEl = document.querySelector(`#${MINIMAP_ID} .bms-mm-room`);
+    if (roomEl) roomEl.textContent = room?.Name ? `房间：${room.Name}` : "";
     minimapGrid = null;
     minimapDirty = true;
     minimapView = { zoom: 1, panX: 0, panY: 0 };
@@ -478,6 +627,7 @@
     minimapDrag = null;
     if (manual) minimapAutoOpen = false;
     document.getElementById(MINIMAP_ID)?.remove();
+    syncMinimapToggle();
   }
 
   function toggleMinimap() {
@@ -486,26 +636,18 @@
   }
 
   function installMinimapHooks() {
-    if (typeof document === "undefined") return; // 小地图依赖 DOM，无 DOM 环境（测试沙箱）不安装
+    if (typeof document === "undefined") return; // 简化地图依赖 DOM，无 DOM 环境（测试沙箱）不安装
+    installTeleportReceiveBoost();
     modApi.hookFunction("ChatRoomRun", 0, (args, next) => {
       const result = next(args);
       if (shouldShowMinimap()) {
-        if (typeof globalThis.DrawButton === "function") {
-          DrawButton(MINIMAP_BUTTON.x, MINIMAP_BUTTON.y, MINIMAP_BUTTON.width, MINIMAP_BUTTON.height, "图", "#DDEBFF", "");
-        }
         if (minimapAutoOpen && !minimapOpen) openMinimap();
         if (minimapOpen) minimapTick();
+        syncMinimapToggle();
       } else if (minimapOpen) {
         closeMinimap();
       }
       return result;
-    });
-    modApi.hookFunction("ChatRoomClick", 1000, (args, next) => {
-      if (shouldShowMinimap() && typeof globalThis.MouseIn === "function" && MouseIn(MINIMAP_BUTTON.x, MINIMAP_BUTTON.y, MINIMAP_BUTTON.width, MINIMAP_BUTTON.height)) {
-        toggleMinimap();
-        return;
-      }
-      return next(args);
     });
     modApi.hookFunction("ChatRoomMapViewUpdateFlag", 0, (args, next) => {
       const result = next(args);

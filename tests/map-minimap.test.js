@@ -211,3 +211,56 @@ test("createTeleportMessage produces the native wire format", () => {
     Target: 777,
   });
 });
+
+test("native teleport lookup resolves top-level lexical bindings", () => {
+  const { api, context } = createRuntime();
+  assert.equal(api.getChatRoomMapViewTeleport(), null);
+  // 新版 BC 用顶层 let 声明：标识符可见但不在 globalThis
+  vm.runInContext("let ChatRoomMapViewTeleport = function (t, p) { return 'lexical-called'; };", context);
+  assert.equal(api.getChatRoomMapViewTeleport()(), "lexical-called");
+  assert.equal(Object.prototype.hasOwnProperty.call(context, "ChatRoomMapViewTeleport"), false);
+});
+
+test("native server send lookup resolves lexical ServerSend when present", () => {
+  const { api, context } = createRuntime();
+  assert.equal(api.getServerSend(), null);
+  vm.runInContext("let ServerSend = function () { return 'send-called'; };", context);
+  assert.equal(api.getServerSend()(), "send-called");
+  assert.equal(Object.prototype.hasOwnProperty.call(context, "ServerSend"), false);
+});
+
+test("event coordinates are scaled from CSS pixels to internal canvas pixels", () => {
+  const { api } = createRuntime();
+  const canvas = { width: 520, height: 520 };
+  // CSS 尺寸被全局样式放大到 650（与内部 520 不一致）时，换算仍应落到正确内部坐标
+  const rect = { left: 100, top: 50, width: 650, height: 650 };
+  const pos = api.minimapEventToCanvasXY(canvas, rect, 100 + 650 / 2, 50 + 650 / 2);
+  assert.ok(Math.abs(pos.x - 260) < 0.001);
+  assert.ok(Math.abs(pos.y - 260) < 0.001);
+  // 比例一致时退化为直接相减
+  const rect2 = { left: 0, top: 0, width: 520, height: 520 };
+  assert.deepEqual(plain(api.minimapEventToCanvasXY(canvas, rect2, 130, 70)), { x: 130, y: 70 });
+});
+
+test("teleport verification reports position unchanged and missing targets", () => {
+  const { api } = createRuntime();
+  assert.equal(api.teleportVerificationMessage(null, 3, 4), "目标已不在房间，传送可能未生效");
+  assert.equal(
+    api.teleportVerificationMessage({ MemberNumber: 222, MapData: { Pos: { X: 1, Y: 1 } } }, 3, 4),
+    "传送未生效：目标未在地图视图或客户端版本过旧（位置未变化）",
+  );
+  assert.equal(
+    api.teleportVerificationMessage({ MemberNumber: 222, MapData: { Pos: { X: 3, Y: 4 } } }, 3, 4),
+    "传送成功：目标位置已更新",
+  );
+});
+
+test("receive boost only targets the exact hidden teleport message for the current player", () => {
+  const { api } = createRuntime();
+  const base = { Type: "Hidden", Content: "ChatRoomMapViewTeleport", Target: 222, Dictionary: [] };
+  assert.equal(api.isTeleportMessageFor(base, 222), true);
+  assert.equal(api.isTeleportMessageFor(base, 12345), false);
+  assert.equal(api.isTeleportMessageFor({ ...base, Type: "Action" }, 222), false);
+  assert.equal(api.isTeleportMessageFor({ ...base, Content: "Other" }, 222), false);
+  assert.equal(api.isTeleportMessageFor(null, 222), false);
+});
