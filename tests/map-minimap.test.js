@@ -482,3 +482,94 @@ test("non-admin teleport is restricted to self and reachable tiles", () => {
   assert.equal(context.Player.MapData.Pos.Y, 3);
   assert.equal(sent.length, 0);
 });
+
+function createModApi(context) {
+  const hooks = [];
+  const modApi = {
+    hookFunction(name, priority, fn) {
+      hooks.push({ name, priority, fn });
+      const original = context[name];
+      // 模拟 bcModSDK 的 hook 链：fn(argsArray, next)，next(argsArray) 展开后调用原函数
+      context[name] = function (...callArgs) {
+        return fn(callArgs, nextArgs => {
+          if (typeof original !== "function") return undefined;
+          return original.apply(this, nextArgs);
+        });
+      };
+    },
+    unload() {},
+    hooks,
+  };
+  return modApi;
+}
+
+test("stealth toggle persists and broadcasts marker", () => {
+  const sent = [];
+  const { api, context } = createRuntime({ ServerSend: (msg, data) => sent.push({ msg, data }) });
+  assert.equal(api.isStealthEnabled(), false);
+  assert.equal(context.Player.MapData.BMSHidden, undefined);
+
+  assert.equal(api.setStealthEnabled(true), true);
+  assert.equal(context.Player.MapData.BMSHidden, true);
+  assert.equal(api.isStealthEnabled(), true);
+  assert.equal(context.localStorage.getItem("BC.MapSaver.stealth:12345"), "1");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].msg, "ChatRoomCharacterMapDataUpdate");
+  assert.equal(sent[0].data.BMSHidden, true);
+
+  api.setStealthEnabled(false);
+  assert.equal(context.Player.MapData.BMSHidden, undefined);
+  assert.equal(context.localStorage.getItem("BC.MapSaver.stealth:12345"), "0");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].data.BMSHidden, undefined);
+});
+
+test("receive hooks mark hidden characters without touching game MapData", () => {
+  const { api, context } = createRuntime();
+  // 模拟原版接收处理：须在沙箱创建后再注入，避免预置函数被 contextify 包装
+  context.ChatRoomMapViewSyncMapData = data => {
+    const char = context.ChatRoomCharacter.find(c => c.MemberNumber === data.MemberNumber);
+    if (char) char.MapData = data.MapData;
+  };
+  context.ChatRoomSyncCharacter = data => {
+    const char = context.ChatRoomCharacter.find(c => c.MemberNumber === data.MemberNumber);
+    if (char) char.MapData = data.MapData;
+  };
+  api.installHooksForTest(createModApi(context));
+
+  const alice = context.ChatRoomCharacter[0];
+  assert.equal(alice.BMSHidden, undefined);
+
+  context.ChatRoomMapViewSyncMapData({ MemberNumber: 111, MapData: { Pos: { X: 6, Y: 6 }, BMSHidden: true } });
+  assert.equal(alice.BMSHidden, true);
+  assert.deepEqual(plain(alice.MapData), { Pos: { X: 6, Y: 6 }, BMSHidden: true }); // 游戏数据保持原样，仅插件侧标记
+
+  context.ChatRoomMapViewSyncMapData({ MemberNumber: 111, MapData: { Pos: { X: 7, Y: 7 } } });
+  assert.equal(alice.BMSHidden, undefined);
+  assert.deepEqual(plain(alice.MapData), { Pos: { X: 7, Y: 7 } });
+
+  // 进房/重同步路径同样生效
+  context.ChatRoomSyncCharacter({ MemberNumber: 222, MapData: { Pos: { X: 3, Y: 3 }, BMSHidden: true } });
+  assert.equal(context.ChatRoomCharacter[1].BMSHidden, true);
+  assert.deepEqual(plain(context.ChatRoomCharacter[1].MapData), { Pos: { X: 3, Y: 3 }, BMSHidden: true });
+});
+
+test("isCharacterHidden: self never hidden, others follow marker", () => {
+  const { api, context } = createRuntime();
+  assert.equal(api.isCharacterHidden(context.Player), false); // 自己永远可见
+  const alice = context.ChatRoomCharacter[0];
+  assert.equal(api.isCharacterHidden(alice), false);
+  alice.BMSHidden = true;
+  assert.equal(api.isCharacterHidden(alice), true);
+  assert.equal(api.isCharacterHidden(null), false);
+});
+
+test("minimap player color prefers LabelColor with fallback", () => {
+  const { api } = createRuntime();
+  assert.equal(api.minimapPlayerColor({ MemberNumber: 111, LabelColor: "#ff66aa" }), "#ff66aa");
+  assert.equal(api.minimapPlayerColor({ MemberNumber: 111, LabelColor: "#f6a" }), "#f6a");
+  const fallback = api.minimapPlayerColor({ MemberNumber: 111 });
+  assert.equal(api.minimapPlayerColor({ MemberNumber: 111, LabelColor: "not-a-color" }), fallback);
+  assert.equal(api.minimapPlayerColor({ MemberNumber: 111, LabelColor: "" }), fallback);
+  assert.match(fallback, /^#[0-9a-f]{6}$/);
+});

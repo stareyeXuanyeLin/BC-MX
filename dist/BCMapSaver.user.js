@@ -803,6 +803,98 @@
     return "fallback";
   }
 
+  // ===== 坐标隐藏（捉迷藏） =====
+  // 插件层面隐藏：本地 Player.MapData 挂 BMSHidden 标记字段，随正常位置广播流转。
+  // 接收端验证器对未知字段原样保留，原版渲染只读 Pos/PrivateState，游戏协议零干预。
+  // 接收端仅在插件侧维护 character.BMSHidden，不改动 char.MapData。
+
+  const STEALTH_STORAGE_PREFIX = "BC.MapSaver.stealth";
+
+  function stealthStorageKey() {
+    const member = currentMemberNumber();
+    return `${STEALTH_STORAGE_PREFIX}:${Number.isInteger(member) ? member : "anonymous"}`;
+  }
+
+  function isStealthEnabled() {
+    try {
+      return localStorage.getItem(stealthStorageKey()) === "1";
+    } catch (error) {
+      warn("读取坐标隐藏状态失败", error);
+      return false;
+    }
+  }
+
+  // 切换隐藏状态：只增删本地 MapData 上的标记字段，随后立即广播一次让所有插件端感知。
+  // 之后玩家正常移动，广播自然携带/摘除该字段，无需任何网络拦截。
+  function setStealthEnabled(enabled) {
+    const player = getPlayerCharacter();
+    if (!player?.MapData) return false;
+    const on = Boolean(enabled);
+    if (on) player.MapData.BMSHidden = true;
+    else delete player.MapData.BMSHidden;
+    try {
+      localStorage.setItem(stealthStorageKey(), on ? "1" : "0");
+    } catch (error) {
+      warn("保存坐标隐藏状态失败", error);
+    }
+    const serverSend = getServerSend();
+    if (typeof serverSend === "function") {
+      try {
+        serverSend("ChatRoomCharacterMapDataUpdate", player.MapData);
+      } catch (error) {
+        warn("广播坐标隐藏状态失败", error);
+      }
+    }
+    return true;
+  }
+
+  // 插件视角下该玩家是否隐藏：自己永远可见；他人看 BMSHidden 标记。
+  function isCharacterHidden(character) {
+    if (!character) return false;
+    if (Number(character.MemberNumber) === currentMemberNumber()) return false;
+    return character.BMSHidden === true;
+  }
+
+  function applyStealthMarker(character, mapData) {
+    if (!character) return;
+    if (mapData?.BMSHidden === true) character.BMSHidden = true;
+    else delete character.BMSHidden;
+  }
+
+  // 接收端：跟随每次 MapData 同步识别隐藏标记，仅维护插件侧状态。
+  function installStealthHooks() {
+    if (typeof globalThis.ChatRoomMapViewSyncMapData === "function") {
+      modApi.hookFunction("ChatRoomMapViewSyncMapData", 0, (args, next) => {
+        const result = next(args);
+        try {
+          const data = args[0];
+          if (data && Number.isInteger(data?.MemberNumber)) {
+            const character = findRoomCharacter(data.MemberNumber);
+            if (character && character !== getPlayerCharacter()) applyStealthMarker(character, data.MapData);
+          }
+        } catch (error) {
+          warn("同步坐标隐藏标记失败", error);
+        }
+        return result;
+      });
+    }
+    if (typeof globalThis.ChatRoomSyncCharacter === "function") {
+      modApi.hookFunction("ChatRoomSyncCharacter", 0, (args, next) => {
+        const result = next(args);
+        try {
+          const data = args[0];
+          if (data && Number.isInteger(data?.MemberNumber)) {
+            const character = findRoomCharacter(data.MemberNumber);
+            if (character && character !== getPlayerCharacter()) applyStealthMarker(character, data.MapData);
+          }
+        } catch (error) {
+          warn("同步坐标隐藏标记失败", error);
+        }
+        return result;
+      });
+    }
+  }
+
 
 
 
@@ -880,7 +972,15 @@
       #${MINIMAP_ID} .bms-mm-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       #${MINIMAP_ID} .bms-mm-pos{font-size:12px;color:#8fb3d8;font-family:Consolas,monospace}
       #${MINIMAP_ID} .bms-mm-me{font-size:11px;color:#ffd94d;border:1px solid #806a41;border-radius:999px;padding:0 6px}
-      #${MINIMAP_ID} .bms-mm-hint{padding:8px 10px;font-size:11px;color:#7d93ad;line-height:1.7;border-top:1px solid #2c425d}
+      #${MINIMAP_ID} .bms-mm-hidden{font-size:11px;color:#ff9d9d;border:1px solid #7a4a26;border-radius:999px;padding:0 6px;flex:none}
+      #${MINIMAP_ID} .bms-mm-stealth{display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid #2c425d;font-size:12px;color:#9eb4ce;cursor:pointer;user-select:none;flex:none}
+      #${MINIMAP_ID} .bms-mm-stealth input{display:none}
+      #${MINIMAP_ID} .bms-mm-slider{position:relative;width:36px;height:19px;border-radius:999px;background:#2a3d57;border:1px solid #45678f;transition:background .15s;flex:none}
+      #${MINIMAP_ID} .bms-mm-slider::after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#b9cde6;transition:transform .15s}
+      #${MINIMAP_ID} .bms-mm-stealth input:checked + .bms-mm-slider{background:#7a4a26;border-color:#c98a4a}
+      #${MINIMAP_ID} .bms-mm-stealth input:checked + .bms-mm-slider::after{transform:translateX(17px);background:#ffd94d}
+      #${MINIMAP_ID} .bms-mm-stealth-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #${MINIMAP_ID} .bms-mm-stealth input:checked ~ .bms-mm-stealth-label{color:#ffc981}
       #${MINIMAP_ID} footer{padding:0 12px 12px;min-height:50px}
       .bms-mm-status{font-size:12px;color:#a8bdd5;line-height:1.7}
       .bms-mm-status strong{color:#8fd0ff}
@@ -923,14 +1023,17 @@
         <span class="bms-mm-spacer"></span>
         <button data-mm="zoomOut" title="缩小">−</button>
         <button data-mm="zoomIn" title="放大">＋</button>
-        <button data-mm="fit" title="复位">⤢</button>
         <button data-mm="close" title="关闭">×</button>
       </header>
       <div class="bms-mm-body">
         <aside class="bms-mm-side">
           <div class="bms-mm-side-title">房间成员</div>
           <ul class="bms-mm-roster"></ul>
-          <div class="bms-mm-hint">滚动缩放 · 拖拽平移 · 点击玩家选中<br>点击格子选择传送目标</div>
+          <label class="bms-mm-stealth" title="隐藏坐标：开启后其它插件用户的小地图不再显示你的坐标与标记，游戏内位置不受影响">
+            <input type="checkbox" data-mm-stealth>
+            <span class="bms-mm-slider"></span>
+            <span class="bms-mm-stealth-label">隐藏坐标</span>
+          </label>
         </aside>
         <canvas width="${MINIMAP_CANVAS_SIZE}" height="${MINIMAP_CANVAS_SIZE}"></canvas>
       </div>
@@ -968,7 +1071,6 @@
       const action = event.target.closest?.("[data-mm]")?.dataset.mm;
       if (action === "zoomIn") minimapZoomAt(MINIMAP_CANVAS_SIZE / 2, MINIMAP_CANVAS_SIZE / 2, 1.25);
       else if (action === "zoomOut") minimapZoomAt(MINIMAP_CANVAS_SIZE / 2, MINIMAP_CANVAS_SIZE / 2, 1 / 1.25);
-      else if (action === "fit") fitMinimapView();
       else if (action === "close") closeMinimap();
     });
 
@@ -977,7 +1079,23 @@
       if (!item) return;
       minimapHandleRosterClick(Number(item.dataset.member));
     });
+    root.querySelector("[data-mm-stealth]").addEventListener("change", event => {
+      const on = event.target.checked === true;
+      if (!setStealthEnabled(on)) {
+        event.target.checked = !on;
+        return;
+      }
+      syncStealthToggle();
+      toast(on ? "已开启隐藏坐标：其他插件用户的小地图将不再显示你" : "已关闭隐藏坐标：小地图恢复显示你", on ? "success" : "info");
+    });
     return root;
+  }
+
+  function syncStealthToggle() {
+    const root = document.getElementById(MINIMAP_ID);
+    const toggle = root?.querySelector("[data-mm-stealth]");
+    if (!toggle) return;
+    toggle.checked = isStealthEnabled();
   }
 
   function fitMinimapView() {
@@ -1066,16 +1184,20 @@
 
   function playerPositionSignature() {
     const list = getRoomCharacterList();
-    return list.map(c => `${c.MemberNumber}:${c.MapData.Pos.X},${c.MapData.Pos.Y}`).sort().join("|");
+    return list
+      .filter(c => !isCharacterHidden(c))
+      .map(c => `${c.MemberNumber}:${c.MapData.Pos.X},${c.MapData.Pos.Y}`).sort().join("|");
   }
 
   function findRoomCharacterAt(gx, gy) {
     const list = getRoomCharacterList();
-    return list.find(c => c.MapData?.Pos?.X === gx && c.MapData?.Pos?.Y === gy) ?? null;
+    return list.find(c => !isCharacterHidden(c) && c.MapData?.Pos?.X === gx && c.MapData?.Pos?.Y === gy) ?? null;
   }
 
-  function minimapPlayerColor(memberNumber) {
-    return MINIMAP_PLAYER_COLORS[Math.abs(Number(memberNumber) || 0) % MINIMAP_PLAYER_COLORS.length];
+  function minimapPlayerColor(character) {
+    const color = character?.LabelColor;
+    if (typeof color === "string" && /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(color)) return color;
+    return MINIMAP_PLAYER_COLORS[Math.abs(Number(character?.MemberNumber) || 0) % MINIMAP_PLAYER_COLORS.length];
   }
 
   function drawMinimap() {
@@ -1125,6 +1247,7 @@
     const list = getRoomCharacterList();
     const myNumber = currentMemberNumber();
     for (const character of list) {
+      if (isCharacterHidden(character)) continue;
       const pos = character.MapData?.Pos;
       if (!pos) continue;
       const p = minimapGridToCanvas(pos.X, pos.Y);
@@ -1133,7 +1256,7 @@
       const isSelected = minimapSelected === character.MemberNumber;
       ctx.beginPath();
       ctx.arc(p.x + step / 2, p.y + step / 2, radius, 0, Math.PI * 2);
-      ctx.fillStyle = isMe ? "#f5f9ff" : minimapPlayerColor(character.MemberNumber);
+      ctx.fillStyle = isMe ? "#f5f9ff" : minimapPlayerColor(character);
       ctx.fill();
       ctx.lineWidth = isSelected ? 3 : 1.4;
       ctx.strokeStyle = isSelected ? "#ffd94d" : isMe ? "#4d94d5" : "rgba(10,15,25,0.85)";
@@ -1180,10 +1303,13 @@
       const isMe = character.MemberNumber === myNumber;
       const isSelected = minimapSelected === character.MemberNumber;
       const name = character.Name ? String(character.Name) : `#${character.MemberNumber}`;
-      return `<li data-member="${character.MemberNumber}" class="${isSelected ? "bms-mm-selected" : ""}" title="${admin ? "点击选中后传送" : ""}">
-        <span class="bms-mm-dot" style="background:${isMe ? "#f5f9ff" : minimapPlayerColor(character.MemberNumber)}"></span>
+      const hidden = !isMe && isCharacterHidden(character);
+      return `<li data-member="${character.MemberNumber}" class="${isSelected ? "bms-mm-selected" : ""}${hidden ? " bms-mm-hidden-item" : ""}" title="${hidden ? "该玩家已隐藏坐标" : (admin ? "点击选中后传送" : "")}">
+        <span class="bms-mm-dot" style="background:${isMe ? "#f5f9ff" : minimapPlayerColor(character)}"></span>
         <span class="bms-mm-name">${escapeHTML(name)}</span>
-        <span class="bms-mm-pos">(${pos?.X ?? "-"}, ${pos?.Y ?? "-"})</span>
+        ${hidden
+          ? '<span class="bms-mm-hidden">🙈 隐藏中</span>'
+          : `<span class="bms-mm-pos">(${pos?.X ?? "-"}, ${pos?.Y ?? "-"})</span>`}
         ${isMe ? '<span class="bms-mm-me">我</span>' : ""}
       </li>`;
     }).join("") || '<li style="cursor:default;color:#7d93ad">房间内没有玩家</li>';
@@ -1192,6 +1318,11 @@
   function minimapHandleRosterClick(memberNumber) {
     if (minimapSwapInProgress) return;
     if (!isRoomAdmin() && memberNumber !== currentMemberNumber()) return; // 非管理员只能选中自己
+    const target = findRoomCharacter(memberNumber);
+    if (isCharacterHidden(target)) {
+      toast("该玩家已隐藏坐标，无法选中或传送", "error");
+      return;
+    }
     if (minimapSelected === memberNumber) {
       minimapSelected = null;
       minimapPending = null;
@@ -1618,6 +1749,10 @@
     const sig = playerPositionSignature();
     if (sig !== minimapPlayerSig) {
       minimapPlayerSig = sig;
+      if (minimapSelected != null && isCharacterHidden(findRoomCharacter(minimapSelected))) {
+        minimapSelected = null;
+        minimapPending = null;
+      }
       if (!minimapSwapInProgress) renderMinimapRoster();
       drawMinimap();
     }
@@ -1634,6 +1769,7 @@
     minimapDirty = true;
     minimapView = { zoom: 1, panX: 0, panY: 0 };
     minimapPlayerSig = ""; // 重置签名：重开后首个 tick 必然重建玩家列表与画面
+    syncStealthToggle();
     minimapTick();
   }
 
@@ -2005,6 +2141,7 @@
         modApi = bcModSdk.registerMod({ name: MOD_NAME, fullName: FULL_NAME, version: VERSION }, { allowReplace: false });
         installHooks();
         installMinimapHooks();
+        installStealthHooks();
         injectStyle();
         injectMinimapStyle();
         runtimeInstalled = true;
@@ -2064,11 +2201,17 @@
       getServerSend,
       minimapEventToCanvasXY,
       minimapCanvasToGridXY,
+      minimapPlayerColor,
+      isStealthEnabled,
+      setStealthEnabled,
+      isCharacterHidden,
+      applyStealthMarker,
+      installStealthHooks,
       teleportVerificationMessage,
       isTeleportMessageFor,
       buildSwapTeleportPlan,
       isPositionReachable,
-      installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); },
+      installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); installStealthHooks(); },
       constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS, ENTRY_BUTTON, MINIMAP_ENTRY_BUTTON },
     };
   } else {

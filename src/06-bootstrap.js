@@ -41,6 +41,7 @@
         modApi = bcModSdk.registerMod({ name: MOD_NAME, fullName: FULL_NAME, version: VERSION }, { allowReplace: false });
         installHooks();
         installMinimapHooks();
+        installStealthHooks();
         injectStyle();
         injectMinimapStyle();
         runtimeInstalled = true;
@@ -100,11 +101,17 @@
       getServerSend,
       minimapEventToCanvasXY,
       minimapCanvasToGridXY,
+      minimapPlayerColor,
+      isStealthEnabled,
+      setStealthEnabled,
+      isCharacterHidden,
+      applyStealthMarker,
+      installStealthHooks,
       teleportVerificationMessage,
       isTeleportMessageFor,
       buildSwapTeleportPlan,
       isPositionReachable,
-      installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); },
+      installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); installStealthHooks(); },
       constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS, ENTRY_BUTTON, MINIMAP_ENTRY_BUTTON },
     };
   } else {

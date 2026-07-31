@@ -365,3 +365,95 @@
     return "fallback";
   }
 
+  // ===== 坐标隐藏（捉迷藏） =====
+  // 插件层面隐藏：本地 Player.MapData 挂 BMSHidden 标记字段，随正常位置广播流转。
+  // 接收端验证器对未知字段原样保留，原版渲染只读 Pos/PrivateState，游戏协议零干预。
+  // 接收端仅在插件侧维护 character.BMSHidden，不改动 char.MapData。
+
+  const STEALTH_STORAGE_PREFIX = "BC.MapSaver.stealth";
+
+  function stealthStorageKey() {
+    const member = currentMemberNumber();
+    return `${STEALTH_STORAGE_PREFIX}:${Number.isInteger(member) ? member : "anonymous"}`;
+  }
+
+  function isStealthEnabled() {
+    try {
+      return localStorage.getItem(stealthStorageKey()) === "1";
+    } catch (error) {
+      warn("读取坐标隐藏状态失败", error);
+      return false;
+    }
+  }
+
+  // 切换隐藏状态：只增删本地 MapData 上的标记字段，随后立即广播一次让所有插件端感知。
+  // 之后玩家正常移动，广播自然携带/摘除该字段，无需任何网络拦截。
+  function setStealthEnabled(enabled) {
+    const player = getPlayerCharacter();
+    if (!player?.MapData) return false;
+    const on = Boolean(enabled);
+    if (on) player.MapData.BMSHidden = true;
+    else delete player.MapData.BMSHidden;
+    try {
+      localStorage.setItem(stealthStorageKey(), on ? "1" : "0");
+    } catch (error) {
+      warn("保存坐标隐藏状态失败", error);
+    }
+    const serverSend = getServerSend();
+    if (typeof serverSend === "function") {
+      try {
+        serverSend("ChatRoomCharacterMapDataUpdate", player.MapData);
+      } catch (error) {
+        warn("广播坐标隐藏状态失败", error);
+      }
+    }
+    return true;
+  }
+
+  // 插件视角下该玩家是否隐藏：自己永远可见；他人看 BMSHidden 标记。
+  function isCharacterHidden(character) {
+    if (!character) return false;
+    if (Number(character.MemberNumber) === currentMemberNumber()) return false;
+    return character.BMSHidden === true;
+  }
+
+  function applyStealthMarker(character, mapData) {
+    if (!character) return;
+    if (mapData?.BMSHidden === true) character.BMSHidden = true;
+    else delete character.BMSHidden;
+  }
+
+  // 接收端：跟随每次 MapData 同步识别隐藏标记，仅维护插件侧状态。
+  function installStealthHooks() {
+    if (typeof globalThis.ChatRoomMapViewSyncMapData === "function") {
+      modApi.hookFunction("ChatRoomMapViewSyncMapData", 0, (args, next) => {
+        const result = next(args);
+        try {
+          const data = args[0];
+          if (data && Number.isInteger(data?.MemberNumber)) {
+            const character = findRoomCharacter(data.MemberNumber);
+            if (character && character !== getPlayerCharacter()) applyStealthMarker(character, data.MapData);
+          }
+        } catch (error) {
+          warn("同步坐标隐藏标记失败", error);
+        }
+        return result;
+      });
+    }
+    if (typeof globalThis.ChatRoomSyncCharacter === "function") {
+      modApi.hookFunction("ChatRoomSyncCharacter", 0, (args, next) => {
+        const result = next(args);
+        try {
+          const data = args[0];
+          if (data && Number.isInteger(data?.MemberNumber)) {
+            const character = findRoomCharacter(data.MemberNumber);
+            if (character && character !== getPlayerCharacter()) applyStealthMarker(character, data.MapData);
+          }
+        } catch (error) {
+          warn("同步坐标隐藏标记失败", error);
+        }
+        return result;
+      });
+    }
+  }
+
