@@ -2,7 +2,7 @@
 // @name         Bondage Club - Map Saver（核心脚本）
 // @name:zh-CN   Bondage Club - 地图存档（核心脚本）
 // @namespace    https://github.com/stareyeXuanyeLin/BC-Map-Saver
-// @version      0.2.2
+// @version      0.2.3
 // @description  在本地保存、导入、导出并重建 Bondage Club 聊天室地图。
 // @author       林宣夜＆佩菈
 // @match        https://www.bondageprojects.com/R*/*
@@ -27,7 +27,7 @@
 
   const MOD_NAME = "BCMapSaver";
   const FULL_NAME = "BC Map Saver";
-  const VERSION = "0.2.2";
+  const VERSION = "0.2.3";
   const STORAGE_SCHEMA_VERSION = 1;
   const RECORD_STORAGE_VERSION = 1;
   const MAP_FILE_FORMAT = "BC_MAP_SAVER_MAP";
@@ -445,9 +445,13 @@
     return typeof globalThis.ChatRoomPlayerIsAdmin === "function" && ChatRoomPlayerIsAdmin() === true;
   }
 
-  function assertRoomMapAction() {
+  function assertRoomContextAction() {
     if (globalThis.CurrentScreen !== "ChatRoom") throw new Error("当前不在聊天室");
     if (!isMapRoom()) throw new Error("当前房间没有启用地图模式");
+  }
+
+  function assertRoomMapAction() {
+    assertRoomContextAction();
     if (!isRoomAdmin()) throw new Error("只有当前房间管理员可以执行此操作");
   }
 
@@ -722,8 +726,48 @@
     };
   }
 
+  // 静态可达性（BFS）：从 (sx, sy) 出发，只经过可通行格，能否走到 (tx, ty)。
+  // 用于非管理员传送限制：封闭空间无法抵达。
+  function isPositionReachable(grid, sx, sy, tx, ty) {
+    if (!grid || grid.width <= 0 || grid.height <= 0) return false;
+    if (tx < 0 || ty < 0 || tx >= grid.width || ty >= grid.height) return false;
+    if (sx === tx && sy === ty) return true;
+    const w = grid.width;
+    const h = grid.height;
+    const walkable = grid.walkable;
+    const visited = new Uint8Array(w * h);
+    const queue = new Int32Array(w * h * 2);
+    let head = 0;
+    let tail = 0;
+    const push = (x, y) => {
+      const i = y * w + x;
+      if (visited[i]) return;
+      visited[i] = 1;
+      queue[tail++] = x;
+      queue[tail++] = y;
+    };
+    push(sx, sy);
+    while (head < tail) {
+      const x = queue[head++];
+      const y = queue[head++];
+      if (x === tx && y === ty) return true;
+      if (y > 0 && walkable[(y - 1) * w + x] === 1) push(x, y - 1);
+      if (y + 1 < h && walkable[(y + 1) * w + x] === 1) push(x, y + 1);
+      if (x > 0 && walkable[y * w + x - 1] === 1) push(x - 1, y);
+      if (x + 1 < w && walkable[y * w + x + 1] === 1) push(x + 1, y);
+    }
+    return false;
+  }
+
   function teleportCharacter(memberNumber, x, y) {
-    assertRoomMapAction();
+    const admin = isRoomAdmin();
+    const self = Number(memberNumber) === currentMemberNumber();
+    if (admin) {
+      assertRoomMapAction();
+    } else {
+      if (!self) throw new Error("只有管理员才能传送其他玩家");
+      assertRoomContextAction();
+    }
     const size = getChatRoomMapViewSize();
     const tx = Number(x);
     const ty = Number(y);
@@ -733,6 +777,16 @@
     const target = findRoomCharacter(memberNumber);
     if (!target) throw new Error("找不到目标玩家");
     const position = { X: tx, Y: ty };
+
+    if (!admin) {
+      // 非管理员：只能传送自己，落点必须是正常行走可抵达的位置（封闭空间不可达）
+      const grid = buildMapGridSnapshot();
+      const start = target.MapData?.Pos;
+      if (!grid || !start) throw new Error("无法获取当前位置");
+      if (!isPositionReachable(grid, start.X, start.Y, tx, ty)) throw new Error("该位置无法通过正常行走抵达");
+      if (target.Position) target.Position = position;
+      return "local";
+    }
 
     const nativeTeleport = getChatRoomMapViewTeleport();
     if (nativeTeleport) {
@@ -774,6 +828,7 @@
   const MINIMAP_TICK_MS = 250;
   const MINIMAP_DRAG_THRESHOLD = 4;
   const MINIMAP_VERIFY_DELAY_MS = 2500;
+  const MINIMAP_SWAP_STEP_DELAY_MS = 1200; // 交换两步之间的间隔：等第一步传送与广播完成，避免消息乱序覆盖
   const MINIMAP_PLAYER_COLORS = ["#e8a0c0", "#8fd0ff", "#a8d68f", "#ffd08f", "#d0a8ff", "#ff9d9d", "#9df0e0", "#f0e0a0"];
   const MINIMAP_TILE_COLORS = {
     [TILE_KIND_EMPTY]: "#232a36",
@@ -1129,7 +1184,7 @@
   }
 
   function minimapHandleRosterClick(memberNumber) {
-    if (!isRoomAdmin()) return;
+    if (!isRoomAdmin() && memberNumber !== currentMemberNumber()) return; // 非管理员只能选中自己
     if (minimapSelected === memberNumber) {
       minimapSelected = null;
       minimapPending = null;
@@ -1174,8 +1229,13 @@
       const target = findRoomCharacter(minimapSelected);
       if (target) {
         const name = target.Name ? String(target.Name) : `#${minimapSelected}`;
-        html = `<div class="bms-mm-status">已选中 <strong>${escapeHTML(name)}</strong> (${target.MapData?.Pos?.X}, ${target.MapData?.Pos?.Y})，点击地图选择目标格子；右键或再次点击取消。</div>
-          <div class="bms-mm-actions"><button data-mm-action="cancel">取消选中</button></div>`;
+        if (isRoomAdmin()) {
+          html = `<div class="bms-mm-status">已选中 <strong>${escapeHTML(name)}</strong> (${target.MapData?.Pos?.X}, ${target.MapData?.Pos?.Y})，点击地图选择目标格子；右键或再次点击取消。</div>
+            <div class="bms-mm-actions"><button data-mm-action="cancel">取消选中</button></div>`;
+        } else {
+          html = `<div class="bms-mm-status">已选中 <strong>${escapeHTML(name)}</strong>（自己），点击可达格子传送（仅限正常行走能到的地方）。</div>
+            <div class="bms-mm-actions"><button data-mm-action="cancel">取消选中</button></div>`;
+        }
       }
     } else if (admin) {
       html = `<div class="bms-mm-status">点击玩家（地图或列表）选中，然后点击目标格子传送（穿墙）。滚动缩放，拖拽平移。</div>`;
@@ -1303,27 +1363,41 @@
       toast("无法获取双方位置", "error");
       return;
     }
-    try {
-      for (const step of plan) teleportCharacter(step.member, step.x, step.y);
-    } catch (error) {
-      toast(error.message, "error");
-      return;
-    }
-    toast("交换指令已发出，等待双方同步…", "success");
-    setTimeout(() => {
-      const aNow = findRoomCharacter(aMember);
-      const bNow = findRoomCharacter(bMember);
-      const [stepA, stepB] = plan;
-      const aOk = aNow?.MapData?.Pos?.X === stepA.x && aNow?.MapData?.Pos?.Y === stepA.y;
-      const bOk = bNow?.MapData?.Pos?.X === stepB.x && bNow?.MapData?.Pos?.Y === stepB.y;
-      if (!aNow || !bNow) {
-        toast("目标已不在房间，交换可能未生效", "error");
-      } else if (aOk && bOk) {
-        toast("交换成功：双方位置已更新", "success");
-      } else {
-        toast("交换尚未完全同步：若目标处于聊天视图，切回地图视图后自动生效", "error");
+    const [stepA, stepB] = plan;
+    // 串行执行：第一步传送 + 房间同步完整广播后，再发第二步。
+    // 若两条传送与多条同步消息同时到达目标端，顺序竞争会把落点覆盖成中间态（“双方偏移”）。
+    const sendStep = (step, done) => {
+      let mode = null;
+      try {
+        mode = teleportCharacter(step.member, step.x, step.y);
+      } catch (error) {
+        toast(error.message, "error");
       }
-    }, MINIMAP_VERIFY_DELAY_MS);
+      done(mode);
+    };
+    sendStep(stepA, modeA => {
+      if (modeA == null) return;
+      if (stepA.member === currentMemberNumber()) toast("你已移动到对方位置，等待对方同步…", "success");
+      setTimeout(() => {
+        sendStep(stepB, modeB => {
+          if (modeB == null) return;
+          toast("交换指令已发出，等待双方同步…", "success");
+          setTimeout(() => {
+            const aNow = findRoomCharacter(aMember);
+            const bNow = findRoomCharacter(bMember);
+            const aOk = aNow?.MapData?.Pos?.X === stepA.x && aNow?.MapData?.Pos?.Y === stepA.y;
+            const bOk = bNow?.MapData?.Pos?.X === stepB.x && bNow?.MapData?.Pos?.Y === stepB.y;
+            if (!aNow || !bNow) {
+              toast("目标已不在房间，交换可能未生效", "error");
+            } else if (aOk && bOk) {
+              toast("交换成功：双方位置已更新", "success");
+            } else {
+              toast("交换尚未完全同步：若目标处于聊天视图，切回地图视图后自动生效", "error");
+            }
+          }, MINIMAP_VERIFY_DELAY_MS);
+        });
+      }, MINIMAP_SWAP_STEP_DELAY_MS);
+    });
   }
 
   function minimapHandleWheel(event) {
@@ -1373,9 +1447,18 @@
     if (!root) return;
     const character = findRoomCharacterAt(grid.x, grid.y);
     const walkable = minimapGrid?.walkable[grid.y * minimapGrid.width + grid.x] === 1;
-    const text = character
-      ? `格子 (${grid.x}, ${grid.y})：${escapeHTML(character.Name ? String(character.Name) : `#${character.MemberNumber}`)}`
-      : `格子 (${grid.x}, ${grid.y})：${walkable ? "可站人" : '<span class="bms-mm-bad">不可站人</span>'}`;
+    let text;
+    if (character) {
+      text = `格子 (${grid.x}, ${grid.y})：${escapeHTML(character.Name ? String(character.Name) : `#${character.MemberNumber}`)}`;
+    } else if (!walkable) {
+      text = `格子 (${grid.x}, ${grid.y})：<span class="bms-mm-bad">不可站人</span>`;
+    } else if (!isRoomAdmin()) {
+      const start = getPlayerCharacter()?.MapData?.Pos;
+      const reachable = start && isPositionReachable(minimapGrid, start.X, start.Y, grid.x, grid.y);
+      text = `格子 (${grid.x}, ${grid.y})：${reachable ? "可传送" : '<span class="bms-mm-bad">无法抵达</span>'}`;
+    } else {
+      text = `格子 (${grid.x}, ${grid.y})：可站人`;
+    }
     root.querySelector("footer").innerHTML = `<div class="bms-mm-status">${text}</div>`;
   }
 
@@ -1395,29 +1478,44 @@
 
   function minimapHandleClick(gx, gy) {
     const character = findRoomCharacterAt(gx, gy);
+    const admin = isRoomAdmin();
+    const myNumber = currentMemberNumber();
     if (character) {
-      if (!isRoomAdmin()) return; // 只读模式不选中
-      if (minimapSelected === character.MemberNumber) {
-        // 再次点击已选中角色：取消选中
-        minimapSelected = null;
-        minimapPending = null;
-      } else if (minimapSelected != null) {
-        // 已选中 A，点击另一角色 B：进入交换位置待确认（不切换选中）
-        const selected = findRoomCharacter(minimapSelected);
-        if (!selected) {
+      if (admin) {
+        // 管理员：取消 / 交换待确认 / 选中
+        if (minimapSelected === character.MemberNumber) {
           minimapSelected = null;
           minimapPending = null;
+        } else if (minimapSelected != null) {
+          const selected = findRoomCharacter(minimapSelected);
+          if (!selected) {
+            minimapSelected = null;
+            minimapPending = null;
+          } else {
+            minimapPending = {
+              member: minimapSelected,
+              x: gx,
+              y: gy,
+              walkable: true,
+              swapWith: character.MemberNumber,
+            };
+          }
         } else {
-          minimapPending = {
-            member: minimapSelected,
-            x: gx,
-            y: gy,
-            walkable: true,
-            swapWith: character.MemberNumber,
-          };
+          minimapSelected = character.MemberNumber;
+          minimapPending = null;
         }
+        renderMinimapStatus();
+        renderMinimapRoster();
+        drawMinimap();
+        return;
+      }
+      // 非管理员：只能选中/取消自己，点击其他玩家忽略
+      if (character.MemberNumber !== myNumber) return;
+      if (minimapSelected === myNumber) {
+        minimapSelected = null;
+        minimapPending = null;
       } else {
-        minimapSelected = character.MemberNumber;
+        minimapSelected = myNumber;
         minimapPending = null;
       }
       renderMinimapStatus();
@@ -1441,6 +1539,14 @@
       return;
     }
     const walkable = minimapGrid.walkable[gy * minimapGrid.width + gx] === 1;
+    if (!admin) {
+      // 非管理员：落点必须可正常行走抵达，否则拒绝
+      const reachable = isPositionReachable(minimapGrid, pos.X, pos.Y, gx, gy);
+      if (!reachable) {
+        toast("该位置无法通过正常行走抵达，传送被拒绝", "error");
+        return;
+      }
+    }
     minimapPending = { member: minimapSelected, x: gx, y: gy, walkable };
     renderMinimapStatus();
     drawMinimap();
@@ -1916,6 +2022,7 @@
       teleportVerificationMessage,
       isTeleportMessageFor,
       buildSwapTeleportPlan,
+      isPositionReachable,
       installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); },
       constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS, ENTRY_BUTTON, MINIMAP_ENTRY_BUTTON },
     };

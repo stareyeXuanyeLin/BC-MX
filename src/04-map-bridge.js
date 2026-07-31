@@ -7,9 +7,13 @@
     return typeof globalThis.ChatRoomPlayerIsAdmin === "function" && ChatRoomPlayerIsAdmin() === true;
   }
 
-  function assertRoomMapAction() {
+  function assertRoomContextAction() {
     if (globalThis.CurrentScreen !== "ChatRoom") throw new Error("当前不在聊天室");
     if (!isMapRoom()) throw new Error("当前房间没有启用地图模式");
+  }
+
+  function assertRoomMapAction() {
+    assertRoomContextAction();
     if (!isRoomAdmin()) throw new Error("只有当前房间管理员可以执行此操作");
   }
 
@@ -284,8 +288,48 @@
     };
   }
 
+  // 静态可达性（BFS）：从 (sx, sy) 出发，只经过可通行格，能否走到 (tx, ty)。
+  // 用于非管理员传送限制：封闭空间无法抵达。
+  function isPositionReachable(grid, sx, sy, tx, ty) {
+    if (!grid || grid.width <= 0 || grid.height <= 0) return false;
+    if (tx < 0 || ty < 0 || tx >= grid.width || ty >= grid.height) return false;
+    if (sx === tx && sy === ty) return true;
+    const w = grid.width;
+    const h = grid.height;
+    const walkable = grid.walkable;
+    const visited = new Uint8Array(w * h);
+    const queue = new Int32Array(w * h * 2);
+    let head = 0;
+    let tail = 0;
+    const push = (x, y) => {
+      const i = y * w + x;
+      if (visited[i]) return;
+      visited[i] = 1;
+      queue[tail++] = x;
+      queue[tail++] = y;
+    };
+    push(sx, sy);
+    while (head < tail) {
+      const x = queue[head++];
+      const y = queue[head++];
+      if (x === tx && y === ty) return true;
+      if (y > 0 && walkable[(y - 1) * w + x] === 1) push(x, y - 1);
+      if (y + 1 < h && walkable[(y + 1) * w + x] === 1) push(x, y + 1);
+      if (x > 0 && walkable[y * w + x - 1] === 1) push(x - 1, y);
+      if (x + 1 < w && walkable[y * w + x + 1] === 1) push(x + 1, y);
+    }
+    return false;
+  }
+
   function teleportCharacter(memberNumber, x, y) {
-    assertRoomMapAction();
+    const admin = isRoomAdmin();
+    const self = Number(memberNumber) === currentMemberNumber();
+    if (admin) {
+      assertRoomMapAction();
+    } else {
+      if (!self) throw new Error("只有管理员才能传送其他玩家");
+      assertRoomContextAction();
+    }
     const size = getChatRoomMapViewSize();
     const tx = Number(x);
     const ty = Number(y);
@@ -295,6 +339,16 @@
     const target = findRoomCharacter(memberNumber);
     if (!target) throw new Error("找不到目标玩家");
     const position = { X: tx, Y: ty };
+
+    if (!admin) {
+      // 非管理员：只能传送自己，落点必须是正常行走可抵达的位置（封闭空间不可达）
+      const grid = buildMapGridSnapshot();
+      const start = target.MapData?.Pos;
+      if (!grid || !start) throw new Error("无法获取当前位置");
+      if (!isPositionReachable(grid, start.X, start.Y, tx, ty)) throw new Error("该位置无法通过正常行走抵达");
+      if (target.Position) target.Position = position;
+      return "local";
+    }
 
     const nativeTeleport = getChatRoomMapViewTeleport();
     if (nativeTeleport) {

@@ -103,6 +103,7 @@
       teleportVerificationMessage,
       isTeleportMessageFor,
       buildSwapTeleportPlan,
+      isPositionReachable,
       installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); },
       constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS, ENTRY_BUTTON, MINIMAP_ENTRY_BUTTON },
     };

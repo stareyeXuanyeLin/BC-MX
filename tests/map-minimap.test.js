@@ -398,3 +398,73 @@ test("reopening the minimap forces a roster redraw", () => {
   assert.match(minimapSource, /data-mm-action="swap"/);
   assert.match(minimapSource, /data-mm-action="switch-select"/);
 });
+
+test("swap executes serially to avoid message race", () => {
+  const minimapSource = fs.readFileSync(path.join(root, "src", "05-minimap.js"), "utf8");
+  // 交换必须串行：第一步传送与同步完成后，再发第二步（防止消息乱序覆盖落点）
+  assert.match(minimapSource, /MINIMAP_SWAP_STEP_DELAY_MS = 1200/);
+  assert.match(minimapSource, /sendStep\(stepA/);
+  assert.match(minimapSource, /setTimeout\(\(\) => \{\s*sendStep\(stepB/);
+});
+
+test("reachability detects enclosed areas for non-admin teleport", () => {
+  const tiles = String.fromCharCode(100).repeat(1600);
+  const objects = String.fromCharCode(0).repeat(1600);
+  const { api } = createRuntime({ ChatRoomData: { Name: "房", MapData: { Type: "Always", Tiles: tiles, Objects: objects } } });
+  const grid = api.buildMapGridSnapshot();
+  // 全地板时处处可达
+  assert.equal(api.isPositionReachable(grid, 1, 1, 30, 30), true);
+  assert.equal(api.isPositionReachable(grid, 4, 4, 4, 4), true);
+  // 手动围出封闭房间：房间 [2,2]~[6,6]，外圈 [1,7] 全不可走
+  for (let y = 0; y < 40; y++) {
+    for (let x = 0; x < 40; x++) {
+      const inside = x >= 2 && x <= 6 && y >= 2 && y <= 6;
+      const ring = ((x === 1 || x === 7) && y >= 1 && y <= 7) || ((y === 1 || y === 7) && x >= 1 && x <= 7);
+      if (!inside && ring) grid.walkable[y * 40 + x] = 0;
+    }
+  }
+  // 房间内相互可达
+  assert.equal(api.isPositionReachable(grid, 4, 4, 3, 3), true);
+  // 外部无法进入封闭房间，房间内无法出去
+  assert.equal(api.isPositionReachable(grid, 20, 20, 4, 4), false);
+  assert.equal(api.isPositionReachable(grid, 4, 4, 20, 20), false);
+  // 墙本身不可达
+  assert.equal(api.isPositionReachable(grid, 20, 20, 1, 1), false);
+  // 越界
+  assert.equal(api.isPositionReachable(grid, 4, 4, 40, 4), false);
+});
+
+test("non-admin teleport is restricted to self and reachable tiles", () => {
+  const tiles = String.fromCharCode(100).repeat(1600);
+  const objects = String.fromCharCode(0).repeat(1600);
+  const sent = [];
+  const { api, context } = createRuntime({
+    ChatRoomPlayerIsAdmin: () => false,
+    ChatRoomData: { Name: "房", MapData: { Type: "Always", Tiles: tiles, Objects: objects } },
+    ServerSend: (type, data) => sent.push({ type, data }),
+  });
+  // 传别人 → 拒绝
+  assert.throws(() => api.teleportCharacter(222, 0, 0), /只有管理员才能传送其他玩家/);
+  // 传自己到可达位置 → 本地生效，不发消息不触发同步
+  const mode = api.teleportCharacter(12345, 5, 5);
+  assert.equal(mode, "local");
+  assert.equal(context.Player.MapData.Pos.X, 5);
+  assert.equal(context.Player.MapData.Pos.Y, 5);
+  assert.equal(sent.length, 0);
+  // 把自己放进封闭房间后，传不出去
+  const grid = api.buildMapGridSnapshot();
+  for (let y = 0; y < 40; y++) {
+    for (let x = 0; x < 40; x++) {
+      const inside = x >= 2 && x <= 6 && y >= 2 && y <= 6;
+      const ring = ((x === 1 || x === 7) && y >= 1 && y <= 7) || ((y === 1 || y === 7) && x >= 1 && x <= 7);
+      if (!inside && ring) grid.walkable[y * 40 + x] = 0;
+    }
+  }
+  context.Player.MapData.Pos = { X: 4, Y: 4 };
+  assert.throws(() => api.teleportCharacter(12345, 20, 20), /无法通过正常行走抵达/);
+  // 房间内可达
+  assert.equal(api.teleportCharacter(12345, 3, 3), "local");
+  assert.equal(context.Player.MapData.Pos.X, 3);
+  assert.equal(context.Player.MapData.Pos.Y, 3);
+  assert.equal(sent.length, 0);
+});
