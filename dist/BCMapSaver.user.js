@@ -1630,8 +1630,11 @@
     if (minimapSwapInProgress) return;
     const canvas = event.currentTarget;
     if (event.button === 2) {
-      // 右键：取消格子目标选择，保持当前选中玩家不变
+      // 右键 = 取消：清除格子目标选择；选中其他玩家时取消选中，选中对象变回自己（自己恒保持选中）
       minimapPending = null;
+      if (minimapSelected != null && minimapSelected !== currentMemberNumber()) {
+        minimapSelected = currentMemberNumber();
+      }
       renderMinimapStatus();
       renderMinimapRoster();
       drawMinimap();
