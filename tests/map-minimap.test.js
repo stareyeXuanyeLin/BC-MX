@@ -394,10 +394,16 @@ test("reopening the minimap forces a roster redraw", () => {
   const minimapSource = fs.readFileSync(path.join(root, "src", "05-minimap.js"), "utf8");
   // 重开后必须重置玩家签名，否则 tick 因签名未变而跳过列表渲染（空列表 bug）
   assert.match(minimapSource, /minimapPlayerSig = ""; \/\/ 重置签名/);
-  // 点击其他角色进入交换待确认（swapWith），不再直接切换选中
-  assert.match(minimapSource, /swapWith: character\.MemberNumber/);
+  // 打开时默认选中自己，成员列表恒有选中项
+  assert.match(minimapSource, /minimapSelected = currentMemberNumber\(\); \/\/ 默认选中自己/);
+  // 点击其他角色进入交换待确认（swapWith），保持原选中
+  assert.match(minimapSource, /swapWith: memberNumber/);
   assert.match(minimapSource, /data-mm-action="swap"/);
   assert.match(minimapSource, /data-mm-action="switch-select"/);
+  // 再次点击同一目标格子确认传送
+  assert.match(minimapSource, /再次点击同一目标格子 = 确认/);
+  // 右键只取消目标格子选择，不清选中
+  assert.match(minimapSource, /\/\/ 右键：取消格子目标选择，保持当前选中玩家不变/);
 });
 
 test("three-step swap executes serially and locks roster interactions until completion", () => {
