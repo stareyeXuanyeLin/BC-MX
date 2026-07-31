@@ -1,31 +1,33 @@
-# BC Map Saver
+# BCMX（BC Map eXtended）
 
-Bondage Club 聊天室地图本地保存、导入导出与房间重建插件。
+Bondage Club 聊天室地图功能强化插件：本地存档、小地图、管理员传送。
+
+> 本项目曾用名 **BC Map Saver**（地图存档）。随功能扩展已更名为 **BCMX**，定位为地图功能强化套件。本地地图库存储键与导入导出文件格式保持兼容，老用户升级无需迁移。
 
 ## 当前版本
 
 ```text
-0.2.0 dev
+0.2.5 dev
 ```
 
-第二阶段功能（小地图与管理员传送）开发中，正式仓库使用 `main` 分支：
+正式仓库使用 `main` 分支：
 
 ```text
-https://github.com/stareyeXuanyeLin/BC-Map-Saver
+https://github.com/stareyeXuanyeLin/BC-MX
 ```
 
 ## 安装
 
 ### 便携远程加载器（推荐）
 
-[![Install Loader](https://img.shields.io/badge/Tampermonkey-%E5%AE%89%E8%A3%85%E5%9C%B0%E5%9B%BE%E5%AD%98%E6%A1%A3-245a91?labelColor=1c1c1c&logo=tampermonkey)](https://raw.githubusercontent.com/stareyeXuanyeLin/BC-Map-Saver/main/dist/BCMapSaver.loader.user.js)
+[![Install Loader](https://img.shields.io/badge/Tampermonkey-%E5%AE%89%E8%A3%85BCMX-245a91?labelColor=1c1c1c&logo=tampermonkey)](https://raw.githubusercontent.com/stareyeXuanyeLin/BC-MX/main/dist/BCMX.loader.user.js)
 
 加载器每次进入 BC 时使用 Tampermonkey 特权请求获取并执行 `main` 分支最新核心脚本。GitHub Raw 不可用时，会依次尝试 jsDelivr、Fastly 和 Gcore 备用源。首次安装时需要允许加载器访问元信息中列出的远程域名。
 
 ### 完整核心脚本
 
 ```text
-https://raw.githubusercontent.com/stareyeXuanyeLin/BC-Map-Saver/main/dist/BCMapSaver.user.js
+https://raw.githubusercontent.com/stareyeXuanyeLin/BC-MX/main/dist/BCMX.user.js
 ```
 
 请只启用加载器或完整核心脚本中的一种，避免同名 Mod 重复注册。
@@ -33,11 +35,13 @@ https://raw.githubusercontent.com/stareyeXuanyeLin/BC-Map-Saver/main/dist/BCMapS
 本地构建产物：
 
 ```text
-dist/BCMapSaver.loader.user.js
-dist/BCMapSaver.user.js
+dist/BCMX.loader.user.js
+dist/BCMX.user.js
 ```
 
 ## 功能
+
+### 地图存档
 
 - 在地图模式左侧工具栏提供“档”按钮；
 - 将当前聊天室地图保存到浏览器本地；
@@ -49,12 +53,20 @@ dist/BCMapSaver.user.js
 - 将任意本地存档应用到当前地图房；
 - 应用前自动备份当前房间地图，最多保留 10 份自动备份；
 - 通过 BC 原生房间更新链路同步给当前房间所有玩家；
-- 按玩家账号编号隔离本地地图库；
+- 按玩家账号编号隔离本地地图库。
+
+### 小地图
+
 - 小地图浮窗：全图概览，实时显示可通行区域与所有玩家位置；
 - 小地图玩家标记颜色固定使用玩家昵称颜色（`Character.LabelColor`），未设置时回退默认色；
 - 坐标隐藏（捉迷藏）：小地图成员列表底部一键切换，开启后其它插件用户的小地图不再显示你的坐标与标记（显示“🙈 隐藏中”），名字仍保留在房间列表；自己视角不受影响，游戏内位置不做任何干预；
-- 小地图支持滚轮缩放（鼠标锚点）与拖拽平移，可查看任意局部区域；
-- 管理员可在小地图上选中任意玩家并传送到任意格子（穿墙语义）。
+- 小地图支持滚轮缩放（鼠标锚点）与拖拽平移，可查看任意局部区域。
+
+### 管理员传送
+
+- 管理员可在小地图上选中任意玩家并传送到任意格子（穿墙语义）；
+- 传送链路不依赖目标安装插件，也不要求目标处于地图视图；
+- 目标玩家同样安装插件时，接收端强制广播位置，进一步缩短同步延迟。
 
 ## 权限
 
@@ -122,7 +134,7 @@ interface LocalMapRecord {
 
 插件不自行解释、重写或二次编码 `payload`。地图格式升级与兼容迁移由 BC 原生 `ChatRoomMapManager` 负责。
 
-本地存储键：
+本地存储键（沿用历史前缀，保证更名前的本地地图库无缝延续）：
 
 ```text
 BC.MapSaver.v1:<MemberNumber>
@@ -138,7 +150,7 @@ BC.MapSaver.v1:<MemberNumber>
 *.bcmap.json
 ```
 
-顶层标识：
+顶层标识（沿用历史值，新旧版本导出文件互通）：
 
 ```text
 BC_MAP_SAVER_MAP

@@ -83,7 +83,7 @@ function createRuntime(overrides = {}) {
   };
   context.globalThis = context;
   vm.createContext(context);
-  vm.runInContext(source, context, { filename: "BCMapSaver.user.js" });
+  vm.runInContext(source, context, { filename: "BCMX.user.js" });
   return { api: context.__BMS_TEST_API__, context };
 }
 

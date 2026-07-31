@@ -1,9 +1,10 @@
 // ==UserScript==
-// @name         Bondage Club - Map Saver（核心脚本）
-// @name:zh-CN   Bondage Club - 地图存档（核心脚本）
-// @namespace    https://github.com/stareyeXuanyeLin/BC-Map-Saver
+// @name         Bondage Club - BCMX（核心脚本）
+// @name:zh-CN   Bondage Club - 地图功能强化（核心脚本）
+// @namespace    https://github.com/stareyeXuanyeLin/BC-MX
 // @version      0.2.5
-// @description  在本地保存、导入、导出并重建 Bondage Club 聊天室地图。
+// @description  Bondage Club 地图功能强化：本地存档、小地图、管理员传送。
+// @description:zh-CN 地图功能强化：本地保存与重建聊天室地图、小地图实时概览、管理员传送玩家。
 // @author       林宣夜＆佩菈
 // @match        https://www.bondageprojects.com/R*/*
 // @match        https://bondageprojects.com/R*/*
@@ -16,23 +17,24 @@
 // @match        http://localhost:*/*
 // @run-at       document-end
 // @grant        none
-// @downloadURL  https://raw.githubusercontent.com/stareyeXuanyeLin/BC-Map-Saver/main/dist/BCMapSaver.user.js
-// @updateURL    https://raw.githubusercontent.com/stareyeXuanyeLin/BC-Map-Saver/main/dist/BCMapSaver.user.js
+// @downloadURL  https://raw.githubusercontent.com/stareyeXuanyeLin/BC-MX/main/dist/BCMX.user.js
+// @updateURL    https://raw.githubusercontent.com/stareyeXuanyeLin/BC-MX/main/dist/BCMX.user.js
 // ==/UserScript==
 
 (() => {
   "use strict";
 
 
-
-  const MOD_NAME = "BCMapSaver";
-  const FULL_NAME = "BC Map Saver";
+  const MOD_NAME = "BCMX";
+  const FULL_NAME = "BC Map eXtended";
   const VERSION = "0.2.5";
   const STORAGE_SCHEMA_VERSION = 1;
   const RECORD_STORAGE_VERSION = 1;
+  // 文件格式标识沿用历史值（BC_MAP_SAVER_*），保证旧版本导出的文件可继续导入，反之亦然。
   const MAP_FILE_FORMAT = "BC_MAP_SAVER_MAP";
   const LIBRARY_FILE_FORMAT = "BC_MAP_SAVER_LIBRARY";
   const FILE_FORMAT_VERSION = 1;
+  // 本地存储键沿用历史前缀（BC.MapSaver.v1），已安装用户的本地地图库不因改名而丢失。
   const STORAGE_PREFIX = "BC.MapSaver.v1";
   const ROOT_ID = "bms-root";
   const STYLE_ID = "bms-style";
@@ -115,7 +117,6 @@
       setTimeout(() => element.remove(), 180);
     }, 2800);
   }
-
 
 
   function normalizeMapRecord(input, options = {}) {
@@ -308,7 +309,6 @@
   }
 
 
-
   function createMapFileDocument(record) {
     return {
       format: MAP_FILE_FORMAT,
@@ -433,7 +433,6 @@
     const filename = `BC地图仓库-${fileTimestamp(now())}.bcmapset.json`;
     downloadTextFile(filename, serializeFileDocument(createLibraryFileDocument(library)));
   }
-
 
 
   function isMapRoom() {
@@ -808,6 +807,7 @@
   // 坐标隐藏沿用 MapData.BMSHidden；地图视角状态写入原版允许扩展的 PrivateState，
   // 随正常 MapData 广播流转。接收端仅在插件侧维护角色状态，原版渲染不读取这些标记。
 
+  // 隐藏状态存储键沿用历史前缀（BC.MapSaver.stealth），已开启隐藏的用户升级后状态保留。
   const STEALTH_STORAGE_PREFIX = "BC.MapSaver.stealth";
 
   function stealthStorageKey() {
@@ -983,7 +983,6 @@
     }
     syncLocalMapViewPresence();
   }
-
 
 
 
@@ -1921,7 +1920,6 @@
   }
 
 
-
   function injectStyle() {
     if (document.getElementById(STYLE_ID)) return;
     const style = document.createElement("style");
@@ -2181,9 +2179,8 @@
   }
 
 
-
   function exposePublicAPI() {
-    globalThis.BCMapSaver = Object.freeze({
+    const api = Object.freeze({
       version: VERSION,
       open: openUI,
       close: closeUI,
@@ -2208,12 +2205,15 @@
         grid: buildMapGridSnapshot,
       },
     });
+    // BCMX 为当前正式 API 名；BCMapSaver 保留为兼容别名，供已发布时依赖旧名的外部脚本使用。
+    globalThis.BCMX = api;
+    globalThis.BCMapSaver = api;
   }
 
   function detectDuplicateInstance() {
-    if (!globalThis.BCMapSaver && !document.getElementById(STYLE_ID) && !document.getElementById(ROOT_ID)) return false;
+    if (!globalThis.BCMX && !globalThis.BCMapSaver && !document.getElementById(STYLE_ID) && !document.getElementById(ROOT_ID)) return false;
     duplicateInstance = true;
-    console.error(`[${MOD_NAME}] 检测到另一份 BC Map Saver，当前实例停止安装。`);
+    console.error(`[${MOD_NAME}] 检测到另一份 BC Map eXtended，当前实例停止安装。`);
     return true;
   }
 
@@ -2310,6 +2310,5 @@
     globalThis.addEventListener?.("load", initialize);
   }
 })();
-
 
 

@@ -1,9 +1,10 @@
 // ==UserScript==
-// @name         Bondage Club - Map Saver（核心脚本）
-// @name:zh-CN   Bondage Club - 地图存档（核心脚本）
-// @namespace    https://github.com/stareyeXuanyeLin/BC-Map-Saver
+// @name         Bondage Club - BCMX（核心脚本）
+// @name:zh-CN   Bondage Club - 地图功能强化（核心脚本）
+// @namespace    https://github.com/stareyeXuanyeLin/BC-MX
 // @version      0.2.5
-// @description  在本地保存、导入、导出并重建 Bondage Club 聊天室地图。
+// @description  Bondage Club 地图功能强化：本地存档、小地图、管理员传送。
+// @description:zh-CN 地图功能强化：本地保存与重建聊天室地图、小地图实时概览、管理员传送玩家。
 // @author       林宣夜＆佩菈
 // @match        https://www.bondageprojects.com/R*/*
 // @match        https://bondageprojects.com/R*/*
@@ -16,8 +17,8 @@
 // @match        http://localhost:*/*
 // @run-at       document-end
 // @grant        none
-// @downloadURL  https://raw.githubusercontent.com/stareyeXuanyeLin/BC-Map-Saver/main/dist/BCMapSaver.user.js
-// @updateURL    https://raw.githubusercontent.com/stareyeXuanyeLin/BC-Map-Saver/main/dist/BCMapSaver.user.js
+// @downloadURL  https://raw.githubusercontent.com/stareyeXuanyeLin/BC-MX/main/dist/BCMX.user.js
+// @updateURL    https://raw.githubusercontent.com/stareyeXuanyeLin/BC-MX/main/dist/BCMX.user.js
 // ==/UserScript==
 
 (() => {

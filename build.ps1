@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $source = Join-Path $root 'src'
 $dist = Join-Path $root 'dist'
-$output = Join-Path $dist 'BCMapSaver.user.js'
+$output = Join-Path $dist 'BCMX.user.js'
 $parts = @(
   '00-userscript-header.js',
   '01-runtime.js',

@@ -1,5 +1,5 @@
   function exposePublicAPI() {
-    globalThis.BCMapSaver = Object.freeze({
+    const api = Object.freeze({
       version: VERSION,
       open: openUI,
       close: closeUI,
@@ -24,12 +24,15 @@
         grid: buildMapGridSnapshot,
       },
     });
+    // BCMX 为当前正式 API 名；BCMapSaver 保留为兼容别名，供已发布时依赖旧名的外部脚本使用。
+    globalThis.BCMX = api;
+    globalThis.BCMapSaver = api;
   }
 
   function detectDuplicateInstance() {
-    if (!globalThis.BCMapSaver && !document.getElementById(STYLE_ID) && !document.getElementById(ROOT_ID)) return false;
+    if (!globalThis.BCMX && !globalThis.BCMapSaver && !document.getElementById(STYLE_ID) && !document.getElementById(ROOT_ID)) return false;
     duplicateInstance = true;
-    console.error(`[${MOD_NAME}] 检测到另一份 BC Map Saver，当前实例停止安装。`);
+    console.error(`[${MOD_NAME}] 检测到另一份 BC Map eXtended，当前实例停止安装。`);
     return true;
   }
 

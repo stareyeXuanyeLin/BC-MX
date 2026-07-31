@@ -370,6 +370,7 @@
   // 坐标隐藏沿用 MapData.BMSHidden；地图视角状态写入原版允许扩展的 PrivateState，
   // 随正常 MapData 广播流转。接收端仅在插件侧维护角色状态，原版渲染不读取这些标记。
 
+  // 隐藏状态存储键沿用历史前缀（BC.MapSaver.stealth），已开启隐藏的用户升级后状态保留。
   const STEALTH_STORAGE_PREFIX = "BC.MapSaver.stealth";
 
   function stealthStorageKey() {

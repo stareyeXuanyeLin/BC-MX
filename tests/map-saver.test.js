@@ -74,7 +74,7 @@ function createRuntime(overrides = {}) {
   if (lexicalBindings) {
     vm.runInContext("let ChatRoomData = __chatRoomDataSeed; const ChatRoomMapManager = __chatRoomMapManagerSeed;", context);
   }
-  vm.runInContext(source, context, { filename: "BCMapSaver.user.js" });
+  vm.runInContext(source, context, { filename: "BCMX.user.js" });
   return { api: context.__BMS_TEST_API__, context, localStorage };
 }
 

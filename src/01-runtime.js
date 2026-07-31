@@ -1,11 +1,13 @@
-  const MOD_NAME = "BCMapSaver";
-  const FULL_NAME = "BC Map Saver";
+  const MOD_NAME = "BCMX";
+  const FULL_NAME = "BC Map eXtended";
   const VERSION = "0.2.5";
   const STORAGE_SCHEMA_VERSION = 1;
   const RECORD_STORAGE_VERSION = 1;
+  // 文件格式标识沿用历史值（BC_MAP_SAVER_*），保证旧版本导出的文件可继续导入，反之亦然。
   const MAP_FILE_FORMAT = "BC_MAP_SAVER_MAP";
   const LIBRARY_FILE_FORMAT = "BC_MAP_SAVER_LIBRARY";
   const FILE_FORMAT_VERSION = 1;
+  // 本地存储键沿用历史前缀（BC.MapSaver.v1），已安装用户的本地地图库不因改名而丢失。
   const STORAGE_PREFIX = "BC.MapSaver.v1";
   const ROOT_ID = "bms-root";
   const STYLE_ID = "bms-style";
