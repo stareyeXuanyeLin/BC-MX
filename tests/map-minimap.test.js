@@ -247,7 +247,7 @@ test("teleport verification reports position unchanged and missing targets", () 
   assert.equal(api.teleportVerificationMessage(null, 3, 4), "目标已不在房间，传送可能未生效");
   assert.equal(
     api.teleportVerificationMessage({ MemberNumber: 222, MapData: { Pos: { X: 1, Y: 1 } } }, 3, 4),
-    "传送未生效：目标未在地图视图或客户端版本过旧（位置未变化）",
+    "目标尚未同步新位置：若目标处于聊天视图，切回地图视图后将自动生效；否则可能客户端版本过旧",
   );
   assert.equal(
     api.teleportVerificationMessage({ MemberNumber: 222, MapData: { Pos: { X: 3, Y: 4 } } }, 3, 4),
