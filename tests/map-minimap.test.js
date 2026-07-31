@@ -367,26 +367,27 @@ test("receive boost only targets the exact hidden teleport message for the curre
   assert.equal(api.isTeleportMessageFor(null, 222), false);
 });
 
-test("swap plan exchanges both coordinates and keeps the original positions", () => {
+test("swap plan uses a temporary adjacent empty tile before filling both original positions", () => {
   const { api } = createRuntime();
   const a = { MemberNumber: 111, MapData: { Pos: { X: 5, Y: 5 } } };
   const b = { MemberNumber: 222, MapData: { Pos: { X: 10, Y: 10 } } };
-  assert.deepEqual(plain(api.buildSwapTeleportPlan(a, b)), [
-    { member: 111, x: 10, y: 10 },
-    { member: 222, x: 5, y: 5 },
-  ]);
-  // 第一次传送后 a 本地位置已变，计划仍使用交换前的原始坐标
-  const movedA = { MemberNumber: 111, MapData: { Pos: { X: 10, Y: 10 } } };
-  assert.deepEqual(plain(api.buildSwapTeleportPlan(movedA, b)), [
-    { member: 111, x: 10, y: 10 },
-    { member: 222, x: 10, y: 10 },
+  const grid = { width: 40, height: 40, walkable: new Uint8Array(1600).fill(1) };
+  assert.deepEqual(plain(api.buildSwapTeleportPlan(a, b, grid, [a, b])), [
+    { member: 222, x: 11, y: 10, phase: "vacate" },
+    { member: 111, x: 10, y: 10, phase: "fill" },
+    { member: 222, x: 5, y: 5, phase: "complete" },
   ]);
 });
 
-test("swap plan rejects characters without positions", () => {
+test("swap plan rejects missing positions and targets without an adjacent empty tile", () => {
   const { api } = createRuntime();
-  assert.equal(api.buildSwapTeleportPlan({ MemberNumber: 111, MapData: null }, { MemberNumber: 222, MapData: { Pos: { X: 1, Y: 1 } } }), null);
-  assert.equal(api.buildSwapTeleportPlan(null, { MemberNumber: 222, MapData: { Pos: { X: 1, Y: 1 } } }), null);
+  const a = { MemberNumber: 111, MapData: { Pos: { X: 5, Y: 5 } } };
+  const b = { MemberNumber: 222, MapData: { Pos: { X: 10, Y: 10 } } };
+  const grid = { width: 40, height: 40, walkable: new Uint8Array(1600).fill(1) };
+  assert.equal(api.buildSwapTeleportPlan({ MemberNumber: 111, MapData: null }, b, grid, [b]), null);
+  assert.equal(api.buildSwapTeleportPlan(null, b, grid, [b]), null);
+  for (const [x, y] of [[11, 10], [9, 10], [10, 11], [10, 9]]) grid.walkable[y * 40 + x] = 0;
+  assert.equal(api.buildSwapTeleportPlan(a, b, grid, [a, b]), null);
 });
 
 test("reopening the minimap forces a roster redraw", () => {
@@ -399,12 +400,15 @@ test("reopening the minimap forces a roster redraw", () => {
   assert.match(minimapSource, /data-mm-action="switch-select"/);
 });
 
-test("swap executes serially to avoid message race", () => {
+test("three-step swap executes serially and locks roster interactions until completion", () => {
   const minimapSource = fs.readFileSync(path.join(root, "src", "05-minimap.js"), "utf8");
-  // 交换必须串行：第一步传送与同步完成后，再发第二步（防止消息乱序覆盖落点）
   assert.match(minimapSource, /MINIMAP_SWAP_STEP_DELAY_MS = 1200/);
-  assert.match(minimapSource, /sendStep\(stepA/);
-  assert.match(minimapSource, /setTimeout\(\(\) => \{\s*sendStep\(stepB/);
+  assert.match(minimapSource, /const runNextStep = \(\) =>/);
+  assert.match(minimapSource, /if \(index < plan\.length\)/);
+  assert.match(minimapSource, /minimapSwapInProgress = true/);
+  assert.match(minimapSource, /minimapSwapInProgress = false/);
+  assert.match(minimapSource, /minimapPlayerSig = "";\s*\/\/ 同步可能替换角色数据对象/);
+  assert.match(minimapSource, /bms-mm-roster\.bms-mm-locked/);
 });
 
 test("reachability detects enclosed areas for non-admin teleport", () => {

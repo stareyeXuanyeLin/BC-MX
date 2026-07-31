@@ -44,6 +44,7 @@
   let minimapPlayerSig = "";
   let minimapDirty = true;
   let minimapBgCanvas = null;
+  let minimapSwapInProgress = false;
 
   function injectMinimapStyle() {
     if (document.getElementById("bms-minimap-style")) return;
@@ -64,6 +65,7 @@
       #${MINIMAP_ID} .bms-mm-side{position:relative!important;inset:auto!important;float:none!important;transform:none!important;margin:0!important;width:${MINIMAP_SIDE_WIDTH}px!important;min-width:0;grid-column:1;grid-row:1;display:flex!important;flex-direction:column;border:1px solid #2c425d;border-radius:6px;background:#0f1a2c;overflow:hidden}
       #${MINIMAP_ID} .bms-mm-side-title{padding:8px 10px;font-size:12px;font-weight:700;color:#9eb4ce;border-bottom:1px solid #2c425d;background:#152238}
       #${MINIMAP_ID} .bms-mm-roster{list-style:none;margin:0;padding:6px;flex:1;overflow-y:auto;min-height:0}
+      #${MINIMAP_ID} .bms-mm-roster.bms-mm-locked{pointer-events:none;opacity:.68}
       #${MINIMAP_ID} .bms-mm-roster li{display:flex;gap:8px;align-items:center;padding:7px 9px;border-radius:7px;cursor:pointer;font-size:13px;border:1px solid transparent}
       #${MINIMAP_ID} .bms-mm-roster li:hover{background:#1c3250}
       #${MINIMAP_ID} .bms-mm-roster li.bms-mm-selected{background:#2b4a72;border-color:#78a5d8}
@@ -358,9 +360,14 @@
     if (!root) return;
     const listEl = root.querySelector(".bms-mm-roster");
     if (!listEl) return;
-    const list = getRoomCharacterList();
     const myNumber = currentMemberNumber();
+    const list = getRoomCharacterList().slice().sort((a, b) => {
+      if (a.MemberNumber === myNumber) return -1;
+      if (b.MemberNumber === myNumber) return 1;
+      return Number(a.MemberNumber) - Number(b.MemberNumber);
+    });
     const admin = isRoomAdmin();
+    listEl.classList.toggle("bms-mm-locked", minimapSwapInProgress);
     listEl.innerHTML = list.map(character => {
       const pos = character.MapData?.Pos;
       const isMe = character.MemberNumber === myNumber;
@@ -376,6 +383,7 @@
   }
 
   function minimapHandleRosterClick(memberNumber) {
+    if (minimapSwapInProgress) return;
     if (!isRoomAdmin() && memberNumber !== currentMemberNumber()) return; // 非管理员只能选中自己
     if (minimapSelected === memberNumber) {
       minimapSelected = null;
@@ -395,6 +403,10 @@
     const footer = root.querySelector("footer");
     const admin = isRoomAdmin();
     let html = "";
+    if (minimapSwapInProgress) {
+      footer.innerHTML = '<div class="bms-mm-status"><strong>三步换位进行中</strong>：正在腾出临时空格并依次移动双方，请稍候…</div>';
+      return;
+    }
     if (minimapPending) {
       if (minimapPending.swapWith != null) {
         const a = findRoomCharacter(minimapPending.member);
@@ -529,17 +541,37 @@
     }, MINIMAP_VERIFY_DELAY_MS);
   }
 
-  // 交换位置传送计划（纯逻辑）：返回先挪谁、后挪谁的坐标序列。
-  // 先取双方原始坐标，避免第一次传送后本地位置已变导致第二次取错。
-  function buildSwapTeleportPlan(a, b) {
+  // 为被临时挪开的角色寻找相邻一格的空落点。只选择可站人且没有角色占用的格子。
+  function findSwapStagingPosition(grid, characters, anchor) {
+    if (!grid || !anchor) return null;
+    const occupied = new Set((characters ?? []).map(character => {
+      const pos = character.MapData?.Pos;
+      return pos ? `${pos.X},${pos.Y}` : "";
+    }).filter(Boolean));
+    const candidates = [
+      { x: anchor.X + 1, y: anchor.Y },
+      { x: anchor.X - 1, y: anchor.Y },
+      { x: anchor.X, y: anchor.Y + 1 },
+      { x: anchor.X, y: anchor.Y - 1 },
+    ];
+    return candidates.find(pos => pos.x >= 0 && pos.y >= 0 && pos.x < grid.width && pos.y < grid.height
+      && grid.walkable[pos.y * grid.width + pos.x] === 1
+      && !occupied.has(`${pos.x},${pos.y}`)) ?? null;
+  }
+
+  // 三步换位：先把 B 挪到相邻空格，再让 A 占据 B 原位置，最后让 B 占据 A 原位置。
+  function buildSwapTeleportPlan(a, b, grid, characters) {
     const ax = a?.MapData?.Pos?.X;
     const ay = a?.MapData?.Pos?.Y;
     const bx = b?.MapData?.Pos?.X;
     const by = b?.MapData?.Pos?.Y;
     if (ax == null || ay == null || bx == null || by == null) return null;
+    const staging = findSwapStagingPosition(grid, characters, { X: bx, Y: by });
+    if (!staging) return null;
     return [
-      { member: a.MemberNumber, x: bx, y: by },
-      { member: b.MemberNumber, x: ax, y: ay },
+      { member: b.MemberNumber, x: staging.x, y: staging.y, phase: "vacate" },
+      { member: a.MemberNumber, x: bx, y: by, phase: "fill" },
+      { member: b.MemberNumber, x: ax, y: ay, phase: "complete" },
     ];
   }
 
@@ -550,46 +582,60 @@
       toast("目标玩家已不在房间", "error");
       return;
     }
-    const plan = buildSwapTeleportPlan(a, b);
+    const grid = minimapGrid ?? buildMapGridSnapshot();
+    const plan = buildSwapTeleportPlan(a, b, grid, getRoomCharacterList());
     if (!plan) {
-      toast("无法获取双方位置", "error");
+      toast("目标角色周围没有可用于换位的相邻空格", "error");
       return;
     }
-    const [stepA, stepB] = plan;
-    // 串行执行：第一步传送 + 房间同步完整广播后，再发第二步。
-    // 若两条传送与多条同步消息同时到达目标端，顺序竞争会把落点覆盖成中间态（“双方偏移”）。
-    const sendStep = (step, done) => {
-      let mode = null;
-      try {
-        mode = teleportCharacter(step.member, step.x, step.y);
-      } catch (error) {
-        toast(error.message, "error");
-      }
-      done(mode);
+    const finalA = plan[1];
+    const finalB = plan[2];
+    let index = 0;
+    minimapSwapInProgress = true;
+    minimapSelected = null;
+    minimapPending = null;
+    renderMinimapRoster();
+    renderMinimapStatus();
+    drawMinimap();
+
+    const finishSwap = () => {
+      minimapSwapInProgress = false;
+      minimapPlayerSig = "";
+      renderMinimapRoster();
+      renderMinimapStatus();
+      drawMinimap();
     };
-    sendStep(stepA, modeA => {
-      if (modeA == null) return;
-      if (stepA.member === currentMemberNumber()) toast("你已移动到对方位置，等待对方同步…", "success");
+    const runNextStep = () => {
+      const step = plan[index];
+      try {
+        teleportCharacter(step.member, step.x, step.y);
+      } catch (error) {
+        toast(`换位第 ${index + 1} 步失败：${error.message}`, "error");
+        finishSwap();
+        return;
+      }
+      index += 1;
+      if (index < plan.length) {
+        setTimeout(runNextStep, MINIMAP_SWAP_STEP_DELAY_MS);
+        return;
+      }
+      toast("三步换位指令已发出，等待双方同步…", "success");
       setTimeout(() => {
-        sendStep(stepB, modeB => {
-          if (modeB == null) return;
-          toast("交换指令已发出，等待双方同步…", "success");
-          setTimeout(() => {
-            const aNow = findRoomCharacter(aMember);
-            const bNow = findRoomCharacter(bMember);
-            const aOk = aNow?.MapData?.Pos?.X === stepA.x && aNow?.MapData?.Pos?.Y === stepA.y;
-            const bOk = bNow?.MapData?.Pos?.X === stepB.x && bNow?.MapData?.Pos?.Y === stepB.y;
-            if (!aNow || !bNow) {
-              toast("目标已不在房间，交换可能未生效", "error");
-            } else if (aOk && bOk) {
-              toast("交换成功：双方位置已更新", "success");
-            } else {
-              toast("交换尚未完全同步：若目标处于聊天视图，切回地图视图后自动生效", "error");
-            }
-          }, MINIMAP_VERIFY_DELAY_MS);
-        });
-      }, MINIMAP_SWAP_STEP_DELAY_MS);
-    });
+        const aNow = findRoomCharacter(aMember);
+        const bNow = findRoomCharacter(bMember);
+        const aOk = aNow?.MapData?.Pos?.X === finalA.x && aNow?.MapData?.Pos?.Y === finalA.y;
+        const bOk = bNow?.MapData?.Pos?.X === finalB.x && bNow?.MapData?.Pos?.Y === finalB.y;
+        if (!aNow || !bNow) {
+          toast("目标已不在房间，换位可能未生效", "error");
+        } else if (aOk && bOk) {
+          toast("换位成功：双方已到达彼此原位置", "success");
+        } else {
+          toast("换位尚未完全同步：若目标处于聊天视图，切回地图视图后自动生效", "error");
+        }
+        finishSwap();
+      }, MINIMAP_VERIFY_DELAY_MS);
+    };
+    runNextStep();
   }
 
   function minimapHandleWheel(event) {
@@ -601,6 +647,7 @@
   }
 
   function minimapHandlePointerDown(event) {
+    if (minimapSwapInProgress) return;
     const canvas = event.currentTarget;
     if (event.button === 2) {
       minimapSelected = null;
@@ -634,7 +681,7 @@
   }
 
   function renderMinimapHoverStatus(grid) {
-    if (minimapPending || minimapSelected != null) return;
+    if (minimapSwapInProgress || minimapPending || minimapSelected != null) return;
     const root = document.getElementById(MINIMAP_ID);
     if (!root) return;
     const character = findRoomCharacterAt(grid.x, grid.y);
@@ -669,6 +716,7 @@
   }
 
   function minimapHandleClick(gx, gy) {
+    if (minimapSwapInProgress) return;
     const character = findRoomCharacterAt(gx, gy);
     const admin = isRoomAdmin();
     const myNumber = currentMemberNumber();
@@ -763,7 +811,7 @@
     const sig = playerPositionSignature();
     if (sig !== minimapPlayerSig) {
       minimapPlayerSig = sig;
-      renderMinimapRoster();
+      if (!minimapSwapInProgress) renderMinimapRoster();
       drawMinimap();
     }
   }
@@ -833,6 +881,7 @@
         const result = next(args);
         minimapGrid = null; // 房间属性替换：强制重建
         minimapDirty = true;
+        minimapPlayerSig = ""; // 同步可能替换角色数据对象，强制下个 tick 重建名单
         minimapAutoOpen = true; // 进入新房间重新自动打开
         minimapSelected = null;
         minimapPending = null;
