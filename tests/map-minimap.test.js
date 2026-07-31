@@ -402,8 +402,8 @@ test("reopening the minimap forces a roster redraw", () => {
   assert.match(minimapSource, /data-mm-action="switch-select"/);
   // 再次点击同一目标格子确认传送
   assert.match(minimapSource, /再次点击同一目标格子 = 确认/);
-  // 右键取消格子目标并回退选中到自己
-  assert.match(minimapSource, /\/\/ 右键 = 取消：清除格子目标选择；选中其他玩家时取消选中，选中对象变回自己/);
+  // 右键逐级回退：先清格子目标，再取消选中其他玩家回自己
+  assert.match(minimapSource, /\/\/ 右键逐级回退：有格子目标先清除格子选择（选中保持）；无目标且选中其他玩家时取消选中，变回自己/);
 });
 
 test("three-step swap executes serially and locks roster interactions until completion", () => {
