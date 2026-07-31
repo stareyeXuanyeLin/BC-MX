@@ -669,22 +669,41 @@
     return globalThis.ChatRoomGetSettings ?? null;
   }
 
-  // 触发一次房间属性同步（原版地图编辑后的常规同步动作）。服务器会向全房间广播
-  // ChatRoomSyncRoomProperties，各客户端在其处理流程中调用
+  // 触发房间属性同步：服务器对无变化的 ChatRoomAdmin Update 可能去重，因此先让
+  // 房间迷雾产生一次真实变化（必然广播 ChatRoomSyncRoomProperties），再立即恢复原状
+  // （再次广播）。各客户端在 ChatRoomSyncRoomProperties 处理流程中调用
   // ChatRoomMapViewInitializeCharacter(Player)，该函数无条件广播自己的当前 MapData。
   // 传送消息先于本调用发出（同一 socket FIFO 保证顺序），目标客户端执行初始化时
   // MapData 已是新位置，从而在目标处于任何视图时都立即向全房间同步新位置。
+  // 两次广播的迷雾中间态持续约一个 RTT，最终房间状态完全恢复。
   function triggerRoomPropertiesSync() {
     const serverSend = getServerSend();
     const getSettings = getChatRoomGetSettings();
     const player = getPlayerCharacter();
     const room = getChatRoomData();
-    if (!serverSend || !getSettings || !player || !room) return;
-    serverSend("ChatRoomAdmin", {
-      MemberNumber: Number(player.ID) || Number(player.MemberNumber),
-      Room: getSettings(room),
-      Action: "Update",
-    });
+    if (!serverSend || !getSettings || !player || !room?.MapData) return;
+    const mapData = room.MapData;
+    const fogWasEnabled = mapData.Fog !== false;
+    const applyFog = enabled => {
+      if (enabled) delete mapData.Fog;
+      else mapData.Fog = false;
+    };
+    const sendUpdate = () => {
+      serverSend("ChatRoomAdmin", {
+        MemberNumber: Number(player.ID) || Number(player.MemberNumber),
+        Room: getSettings(room),
+        Action: "Update",
+      });
+    };
+    try {
+      applyFog(!fogWasEnabled); // 第一次：真实变化，服务器必然广播
+      sendUpdate();
+      applyFog(fogWasEnabled); // 恢复原状
+      sendUpdate();
+    } catch (error) {
+      warn("触发房间属性同步失败", error);
+      applyFog(fogWasEnabled);
+    }
   }
 
   function getServerSend() {

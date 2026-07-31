@@ -202,22 +202,40 @@ test("teleport falls back to a hand-built hidden message identical to the native
   assert.deepEqual(plain(sent[0].data.Dictionary), [{ Tag: "MapViewTeleport", Position: { X: 3, Y: 4 } }]);
 });
 
-test("teleport triggers a room properties sync after the hidden message", () => {
+test("teleport triggers a fog-flip room sync so the server broadcasts twice", () => {
   const sent = [];
-  const { api } = createRuntime({
+  const { api, context } = createRuntime({
     ServerSend: (type, data) => sent.push({ type, data }),
-    ChatRoomGetSettings: room => ({ Name: room.Name, MapData: room.MapData }),
+    ChatRoomGetSettings: room => ({ Name: room.Name, MapData: { ...room.MapData } }),
   });
   api.teleportCharacter(222, 3, 4);
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 3);
   assert.equal(sent[0].type, "ChatRoomChat"); // 传送消息先发
-  assert.equal(sent[1].type, "ChatRoomAdmin"); // 同步后发，保证目标端先更新本地位置
+  assert.equal(sent[1].type, "ChatRoomAdmin"); // 第一次：迷雾翻转（真实变化）
+  assert.equal(sent[2].type, "ChatRoomAdmin"); // 第二次：迷雾恢复
   assert.equal(sent[1].data.Action, "Update");
   assert.equal(sent[1].data.MemberNumber, 12345);
-  assert.deepEqual(plain(sent[1].data.Room), { Name: "测试地图房", MapData: { Type: "Always", Tiles: String.fromCharCode(100).repeat(1600), Objects: String.fromCharCode(0).repeat(1600) } });
+  // 第一次提交关闭迷雾，第二次恢复启用
+  assert.equal(sent[1].data.Room.MapData.Fog, false);
+  assert.equal(sent[2].data.Room.MapData.Fog, undefined);
+  // 本地房间数据最终恢复原状（Fog 未显式设置）
+  assert.equal(Object.prototype.hasOwnProperty.call(context.ChatRoomData.MapData, "Fog"), false);
 });
 
-test("native teleport path also triggers the room properties sync", () => {
+test("fog flip restores an explicitly disabled fog to disabled", () => {
+  const sent = [];
+  const { api, context } = createRuntime({
+    ServerSend: (type, data) => sent.push({ type, data }),
+    ChatRoomGetSettings: room => ({ Name: room.Name, MapData: { ...room.MapData } }),
+    ChatRoomData: { Name: "房", MapData: { Type: "Always", Fog: false, Tiles: "t", Objects: "o" } },
+  });
+  api.teleportCharacter(222, 3, 4);
+  assert.equal(sent[1].data.Room.MapData.Fog, undefined); // 第一次翻转为启用
+  assert.equal(sent[2].data.Room.MapData.Fog, false); // 恢复为关闭
+  assert.equal(context.ChatRoomData.MapData.Fog, false);
+});
+
+test("native teleport path also triggers the fog-flip room sync", () => {
   const sent = [];
   const nativeCalls = [];
   const { api } = createRuntime({
@@ -227,9 +245,9 @@ test("native teleport path also triggers the room properties sync", () => {
   });
   api.teleportCharacter(222, 7, 9);
   assert.equal(nativeCalls.length, 1);
-  assert.equal(sent.length, 1);
+  assert.equal(sent.length, 2);
   assert.equal(sent[0].type, "ChatRoomAdmin");
-  assert.equal(sent[0].data.Action, "Update");
+  assert.equal(sent[1].type, "ChatRoomAdmin");
 });
 
 test("fallback teleport of self applies the position locally and sends the message", () => {
