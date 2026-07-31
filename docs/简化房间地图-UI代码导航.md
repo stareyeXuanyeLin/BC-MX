@@ -80,16 +80,15 @@ npm test                              # 等价 node --test --test-isolation=none
 | 507~560 | `minimapHandleWheel / PointerDown / PointerMove / PointerUp` | canvas 交互：缩放、拖拽、点击判定（4px 拖动阈值） |
 | 574 | `minimapHandleClick(gx, gy)` | 点击逻辑：点玩家选中 / 选中后点格子进入待确认 |
 | 611 | `minimapTick()` | 250ms 周期：地图数据变化检测 → 重建底图；玩家位置变化 → 重绘 + 刷新列表 |
-| 635 | `openMinimap()` | 打开面板（进地图房自动调用） |
-| 649 | `closeMinimap(manual)` | 关闭面板（manual 时本房间不再自动开） |
+| 635 | `openMinimap()` | 打开面板（默认关闭，由“图”按钮手动打开） |
+| 649 | `closeMinimap()` | 关闭面板并移除 DOM |
 | 661 | `toggleMinimap()` | 开关切换 |
-| 666 | `installMinimapHooks()` | ChatRoomRun（tick + 自动开 + 按钮同步）、ChatRoomMapViewUpdateFlag（底图脏标记）、ChatRoomSyncRoomProperties（房间切换重置）、ChatRoomLeave（关闭） |
+| 666 | `installMinimapHooks()` | ChatRoomRun（tick + 按钮同步）、ChatRoomMapViewUpdateFlag（底图脏标记）、ChatRoomSyncRoomProperties（房间切换重置）、ChatRoomLeave（关闭） |
 
 ### 2.3 状态变量（行 30~41）
 
 ```js
 minimapOpen        // 面板是否打开
-minimapAutoOpen    // 进地图房自动打开（手动关闭后置 false，换房间重置 true）
 minimapGrid        // buildMapGridSnapshot() 结果（walkable/tileKind/字符串引用）
 minimapView        // { zoom, panX, panY } 视口变换
 minimapDrag        // canvas 拖拽状态（平移地图）

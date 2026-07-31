@@ -2,7 +2,7 @@
 // @name         Bondage Club - Map Saver（核心脚本）
 // @name:zh-CN   Bondage Club - 地图存档（核心脚本）
 // @namespace    https://github.com/stareyeXuanyeLin/BC-Map-Saver
-// @version      0.2.4
+// @version      0.2.5
 // @description  在本地保存、导入、导出并重建 Bondage Club 聊天室地图。
 // @author       林宣夜＆佩菈
 // @match        https://www.bondageprojects.com/R*/*
@@ -27,7 +27,7 @@
 
   const MOD_NAME = "BCMapSaver";
   const FULL_NAME = "BC Map Saver";
-  const VERSION = "0.2.4";
+  const VERSION = "0.2.5";
   const STORAGE_SCHEMA_VERSION = 1;
   const RECORD_STORAGE_VERSION = 1;
   const MAP_FILE_FORMAT = "BC_MAP_SAVER_MAP";
@@ -841,7 +841,6 @@
   };
 
   let minimapOpen = false;
-  let minimapAutoOpen = true;
   let minimapGrid = null;
   let minimapView = { zoom: 1, panX: 0, panY: 0 };
   let minimapDrag = null;
@@ -970,7 +969,7 @@
       if (action === "zoomIn") minimapZoomAt(MINIMAP_CANVAS_SIZE / 2, MINIMAP_CANVAS_SIZE / 2, 1.25);
       else if (action === "zoomOut") minimapZoomAt(MINIMAP_CANVAS_SIZE / 2, MINIMAP_CANVAS_SIZE / 2, 1 / 1.25);
       else if (action === "fit") fitMinimapView();
-      else if (action === "close") closeMinimap(true);
+      else if (action === "close") closeMinimap();
     });
 
     root.querySelector(".bms-mm-roster").addEventListener("click", event => {
@@ -1638,19 +1637,18 @@
     minimapTick();
   }
 
-  function closeMinimap(manual = false) {
+  function closeMinimap() {
     if (!minimapOpen) return;
     minimapOpen = false;
     minimapSelected = null;
     minimapPending = null;
     minimapHover = null;
     minimapDrag = null;
-    if (manual) minimapAutoOpen = false;
     document.getElementById(MINIMAP_ID)?.remove();
   }
 
   function toggleMinimap() {
-    if (minimapOpen) closeMinimap(true);
+    if (minimapOpen) closeMinimap();
     else openMinimap();
   }
 
@@ -1660,7 +1658,6 @@
     modApi.hookFunction("ChatRoomRun", 0, (args, next) => {
       const result = next(args);
       if (shouldShowMinimap()) {
-        if (minimapAutoOpen && !minimapOpen) openMinimap();
         if (minimapOpen) minimapTick();
         if (shouldDrawMinimapEntryButton() && typeof globalThis.DrawButton === "function") {
           DrawButton(MINIMAP_ENTRY_BUTTON.x, MINIMAP_ENTRY_BUTTON.y, MINIMAP_ENTRY_BUTTON.width, MINIMAP_ENTRY_BUTTON.height, "图", "#DDEBFF", "");
@@ -1690,7 +1687,6 @@
         minimapGrid = null; // 房间属性替换：强制重建
         minimapDirty = true;
         minimapPlayerSig = ""; // 同步可能替换角色数据对象，强制下个 tick 重建名单
-        minimapAutoOpen = true; // 进入新房间重新自动打开
         minimapSelected = null;
         minimapPending = null;
         return result;

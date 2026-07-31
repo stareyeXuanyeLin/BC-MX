@@ -411,6 +411,16 @@ test("three-step swap executes serially and locks roster interactions until comp
   assert.match(minimapSource, /bms-mm-roster\.bms-mm-locked/);
 });
 
+test("minimap stays closed by default and only opens on demand", () => {
+  const minimapSource = fs.readFileSync(path.join(root, "src", "05-minimap.js"), "utf8");
+  // 不再自动打开：无 autoOpen 状态、无进房自动 openMinimap 调用
+  assert.doesNotMatch(minimapSource, /minimapAutoOpen/);
+  assert.doesNotMatch(minimapSource, /closeMinimap\(true\)/);
+  assert.doesNotMatch(minimapSource, /minimapAutoOpen && !minimapOpen\) openMinimap/);
+  // 仍保留手动开关
+  assert.match(minimapSource, /function toggleMinimap\(\)/);
+});
+
 test("reachability detects enclosed areas for non-admin teleport", () => {
   const tiles = String.fromCharCode(100).repeat(1600);
   const objects = String.fromCharCode(0).repeat(1600);
