@@ -12,6 +12,9 @@ coverage/
 .vscode/
 .idea/
 
+# Local design docs（不上传仓库，保留本地）
+docs/
+
 # Local evidence and exports
 *.har
 *.trace
