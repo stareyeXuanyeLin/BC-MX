@@ -189,6 +189,36 @@ test("teleport falls back to a hand-built hidden message identical to the native
   assert.deepEqual(plain(sent[0].data.Dictionary), [{ Tag: "MapViewTeleport", Position: { X: 3, Y: 4 } }]);
 });
 
+test("teleport triggers a room properties sync after the hidden message", () => {
+  const sent = [];
+  const { api } = createRuntime({
+    ServerSend: (type, data) => sent.push({ type, data }),
+    ChatRoomGetSettings: room => ({ Name: room.Name, MapData: room.MapData }),
+  });
+  api.teleportCharacter(222, 3, 4);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].type, "ChatRoomChat"); // 传送消息先发
+  assert.equal(sent[1].type, "ChatRoomAdmin"); // 同步后发，保证目标端先更新本地位置
+  assert.equal(sent[1].data.Action, "Update");
+  assert.equal(sent[1].data.MemberNumber, 12345);
+  assert.deepEqual(plain(sent[1].data.Room), { Name: "测试地图房", MapData: { Type: "Always", Tiles: String.fromCharCode(100).repeat(1600), Objects: String.fromCharCode(0).repeat(1600) } });
+});
+
+test("native teleport path also triggers the room properties sync", () => {
+  const sent = [];
+  const nativeCalls = [];
+  const { api } = createRuntime({
+    ServerSend: (type, data) => sent.push({ type, data }),
+    ChatRoomGetSettings: room => ({ Name: room.Name, MapData: room.MapData }),
+    ChatRoomMapViewTeleport: (target, position) => nativeCalls.push({ target, position }),
+  });
+  api.teleportCharacter(222, 7, 9);
+  assert.equal(nativeCalls.length, 1);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, "ChatRoomAdmin");
+  assert.equal(sent[0].data.Action, "Update");
+});
+
 test("fallback teleport of self applies the position locally and sends the message", () => {
   const sent = [];
   const { api, context } = createRuntime({

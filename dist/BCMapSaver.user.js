@@ -657,6 +657,31 @@
     return globalThis.ChatRoomMapViewTeleport ?? null;
   }
 
+  function getChatRoomGetSettings() {
+    try {
+      if (typeof ChatRoomGetSettings === "function") return ChatRoomGetSettings;
+    } catch (_) { /* fall through to legacy window property */ }
+    return globalThis.ChatRoomGetSettings ?? null;
+  }
+
+  // 触发一次房间属性同步（原版地图编辑后的常规同步动作）。服务器会向全房间广播
+  // ChatRoomSyncRoomProperties，各客户端在其处理流程中调用
+  // ChatRoomMapViewInitializeCharacter(Player)，该函数无条件广播自己的当前 MapData。
+  // 传送消息先于本调用发出（同一 socket FIFO 保证顺序），目标客户端执行初始化时
+  // MapData 已是新位置，从而在目标处于任何视图时都立即向全房间同步新位置。
+  function triggerRoomPropertiesSync() {
+    const serverSend = getServerSend();
+    const getSettings = getChatRoomGetSettings();
+    const player = getPlayerCharacter();
+    const room = getChatRoomData();
+    if (!serverSend || !getSettings || !player || !room) return;
+    serverSend("ChatRoomAdmin", {
+      MemberNumber: Number(player.ID) || Number(player.MemberNumber),
+      Room: getSettings(room),
+      Action: "Update",
+    });
+  }
+
   function getServerSend() {
     try {
       if (typeof ServerSend === "function") return ServerSend;
@@ -688,6 +713,7 @@
     const nativeTeleport = getChatRoomMapViewTeleport();
     if (nativeTeleport) {
       nativeTeleport(target, position);
+      triggerRoomPropertiesSync();
       return "native";
     }
     const serverSend = getServerSend();
@@ -695,6 +721,7 @@
     const player = getPlayerCharacter();
     if (target === player && target.Position) target.Position = position; // 对齐原版“传自己本地立即生效”语义
     serverSend("ChatRoomChat", createTeleportMessage(memberNumber, tx, ty));
+    triggerRoomPropertiesSync();
     return "fallback";
   }
 
