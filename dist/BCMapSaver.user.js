@@ -883,14 +883,21 @@
     else delete character.BMSMapViewActive;
   }
 
+  // 同步本地地图状态：把持久化的隐藏开关重新映射回 MapData，覆盖重登/对象重建后
+  // 新 MapData 丢失 BMSHidden 标记的情况；同时维护地图视角在线标记。
+  // 任一字段变化或强制时立即广播一次，让房间内所有插件端感知。
   function syncLocalMapViewPresence(force = false) {
     const player = getPlayerCharacter();
     if (!player?.MapData) return false;
+    const hidden = isStealthEnabled();
+    const hiddenChanged = (player.MapData.BMSHidden === true) !== hidden;
+    if (hidden) player.MapData.BMSHidden = true;
+    else delete player.MapData.BMSHidden;
     const active = isLocalMapViewActive();
     const privateState = player.MapData.PrivateState && typeof player.MapData.PrivateState === "object"
       ? player.MapData.PrivateState
       : (player.MapData.PrivateState = {});
-    const changed = (privateState.BMSMapViewActive === true) !== active;
+    const changed = (privateState.BMSMapViewActive === true) !== active || hiddenChanged;
     if (active) privateState.BMSMapViewActive = true;
     else delete privateState.BMSMapViewActive;
     if (active) player.BMSMapViewActive = true;

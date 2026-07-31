@@ -642,6 +642,35 @@ test("active map player rebroadcasts plugin markers after a member joins", async
   assert.equal(sent[0].data.PrivateState.BMSMapViewActive, true);
 });
 
+test("relog: stealth storage is restored onto fresh MapData and included in rebroadcast", async () => {
+  const sent = [];
+  const ls = createLocalStorage();
+  ls.setItem("BC.MapSaver.stealth:12345", "1"); // 重登前已开启隐藏，localStorage 保留
+  const { api, context } = createRuntime({
+    localStorage: ls,
+    ServerSend: (msg, data) => sent.push({ msg, data }),
+  });
+  // 模拟重登：Player.MapData 是全新对象，不再带 BMSHidden
+  assert.equal(context.Player.MapData.BMSHidden, undefined);
+
+  // 插件安装触发本地状态同步：应立即把持久化隐藏状态恢复回 MapData 并广播
+  context.ChatRoomSyncMemberJoin = () => {};
+  api.installHooksForTest(createModApi(context));
+  assert.equal(context.Player.MapData.BMSHidden, true);
+  assert.ok(sent.length >= 1);
+  assert.equal(sent[0].msg, "ChatRoomCharacterMapDataUpdate");
+  assert.equal(sent[0].data.BMSHidden, true);
+
+  // 新成员加入后的补发同样携带 BMSHidden，新成员不会看到隐藏中的自己
+  sent.length = 0;
+  context.ChatRoomSyncMemberJoin({ Character: { MemberNumber: 444, MapData: null } });
+  assert.equal(sent.length, 0); // 延迟广播尚未触发
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].msg, "ChatRoomCharacterMapDataUpdate");
+  assert.equal(sent[0].data.BMSHidden, true);
+});
+
 test("isCharacterHidden: self never hidden, others follow marker", () => {
   const { api, context } = createRuntime();
   assert.equal(api.isCharacterHidden(context.Player), false); // 自己永远可见
