@@ -155,6 +155,19 @@ test("room character list filters out characters without map data", () => {
   assert.equal(api.playerPositionSignature(), "111:5,5|12345:20,20|222:10,10");
 });
 
+test("room character list deduplicates the player when included in the room list", () => {
+  const { api } = createRuntime({
+    ChatRoomCharacter: [
+      { MemberNumber: 111, Name: "Alice", MapData: { Pos: { X: 5, Y: 5 } } },
+      { MemberNumber: 12345, Name: "Myself", MapData: { Pos: { X: 20, Y: 20 } } }, // 重复的自己
+      { MemberNumber: 222, Name: "Bob", MapData: { Pos: { X: 10, Y: 10 } } },
+    ],
+  });
+  const list = api.getRoomCharacterList();
+  assert.equal(list.length, 3);
+  assert.deepEqual([...list.map(c => c.MemberNumber)].sort((a, b) => a - b), [111, 222, 12345]);
+});
+
 test("teleport rejects non-admin, out-of-range and unknown targets", () => {
   const { api, context } = createRuntime({ ChatRoomPlayerIsAdmin: () => false });
   assert.throws(() => api.teleportCharacter(222, 0, 0), /管理员/);
@@ -270,6 +283,22 @@ test("event coordinates are scaled from CSS pixels to internal canvas pixels", (
   // 比例一致时退化为直接相减
   const rect2 = { left: 0, top: 0, width: 520, height: 520 };
   assert.deepEqual(plain(api.minimapEventToCanvasXY(canvas, rect2, 130, 70)), { x: 130, y: 70 });
+});
+
+test("grid coordinates round-trip through the viewport transform", () => {
+  const { api } = createRuntime();
+  const grid = { width: 40, height: 40 };
+  const step = 13; // MINIMAP_TILE 12 + MINIMAP_GAP 1
+  // 拖拽 + 缩放后的视口：grid(3,4) → canvas 中心 (108, 124)
+  const view = { zoom: 2, panX: 30, panY: 20 };
+  const point = api.minimapCanvasToGridXY(3 * step * view.zoom + view.panX, 4 * step * view.zoom + view.panY, view, grid);
+  assert.deepEqual(plain(point), { x: 3, y: 4 });
+  // 命中格子内部任意一点仍应回落到同一格子
+  const inside = api.minimapCanvasToGridXY(3 * step * view.zoom + view.panX + 5, 4 * step * view.zoom + view.panY + 9, view, grid);
+  assert.deepEqual(plain(inside), { x: 3, y: 4 });
+  // 越界返回 null
+  assert.equal(api.minimapCanvasToGridXY(-100, 0, view, grid), null);
+  assert.equal(api.minimapCanvasToGridXY(0, 99999, view, grid), null);
 });
 
 test("teleport verification reports position unchanged and missing targets", () => {

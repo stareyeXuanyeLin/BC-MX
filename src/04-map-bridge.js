@@ -127,11 +127,16 @@
 
   function getRoomCharacterList() {
     const result = [];
+    const myNumber = currentMemberNumber();
     const player = getPlayerCharacter();
     if (player?.MapData?.Pos) result.push(player);
     const list = getChatRoomCharacterList();
     if (Array.isArray(list)) {
-      for (const character of list) if (character?.MapData?.Pos) result.push(character);
+      for (const character of list) {
+        if (!character?.MapData?.Pos) continue;
+        if (Number(character.MemberNumber) === Number(myNumber)) continue; // 房间角色列表可能包含自己，去重
+        result.push(character);
+      }
     }
     return result;
   }

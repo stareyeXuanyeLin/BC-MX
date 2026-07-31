@@ -98,6 +98,7 @@
       getChatRoomMapViewTeleport,
       getServerSend,
       minimapEventToCanvasXY,
+      minimapCanvasToGridXY,
       teleportVerificationMessage,
       isTeleportMessageFor,
       installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); },

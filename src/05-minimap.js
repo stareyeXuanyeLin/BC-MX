@@ -1,12 +1,14 @@
   // ===== 简化房间地图（第二功能模块） =====
-  // 大号操作面板：色块渲染全图（可通行/墙壁/障碍），右侧玩家列表，管理员可选中玩家并传送到任意格子。
-  // 视口变换：滚轮缩放（鼠标锚点）+ 拖拽平移。坐标换算按 canvas 内部像素 / CSS 像素比例进行，
-  // 免疫全局样式或浏览器缩放造成的尺寸不一致。
+  // 大号操作面板：左侧房间成员列表，右侧色块渲染全图（可通行/墙壁/障碍）。
+  // 管理员可选中玩家并传送到任意格子。视口变换：滚轮缩放（鼠标锚点）+ 拖拽平移。
+  // 坐标换算按 canvas 内部像素 / CSS 像素比例进行，免疫全局样式或浏览器缩放造成的尺寸不一致。
 
   const MINIMAP_ID = "bms-minimap";
   const MINIMAP_TOGGLE_ID = "bms-minimap-toggle";
-  const MINIMAP_TOGGLE_POS = Object.freeze({ x: 10, y: 570, width: 60, height: 60 }); // “档”按钮正下方
+  const MINIMAP_TOGGLE_POS = Object.freeze({ x: 10, y: 570, width: 60, height: 60 }); // “档”按钮正下方（视觉上在下面，不重叠）
   const MINIMAP_CANVAS_SIZE = 520;
+  const MINIMAP_PANEL_WIDTH = 778;
+  const MINIMAP_SIDE_WIDTH = 222;
   const MINIMAP_TILE = 12;
   const MINIMAP_GAP = 1;
   const MINIMAP_ZOOM_MIN = 0.5;
@@ -30,6 +32,7 @@
   let minimapGrid = null;
   let minimapView = { zoom: 1, panX: 0, panY: 0 };
   let minimapDrag = null;
+  let minimapPanelDrag = null;
   let minimapHover = null;
   let minimapSelected = null;
   let minimapPending = null;
@@ -44,18 +47,18 @@
     style.textContent = `
       #${MINIMAP_TOGGLE_ID}{position:fixed;left:${MINIMAP_TOGGLE_POS.x}px;top:${MINIMAP_TOGGLE_POS.y}px;z-index:99980;width:${MINIMAP_TOGGLE_POS.width}px;height:${MINIMAP_TOGGLE_POS.height}px;border:1px solid #4b6e98;border-radius:10px;background:#203858;color:#f2f7ff;font-size:18px;font-weight:700;cursor:pointer;font-family:Inter,"Microsoft YaHei",sans-serif;line-height:1}
       #${MINIMAP_TOGGLE_ID}:hover{background:#2b4a72;border-color:#78a5d8}
-      #${MINIMAP_ID}{position:fixed;left:50%;top:36px;transform:translateX(-50%);z-index:99990;width:806px;background:#111d31;border:1px solid #45678f;border-radius:12px;box-shadow:0 18px 52px rgba(0,0,0,.6);font-family:Inter,"Microsoft YaHei",sans-serif;color:#eaf2ff;user-select:none;overflow:hidden}
+      #${MINIMAP_ID}{position:fixed;left:50%;top:36px;z-index:99990;width:${MINIMAP_PANEL_WIDTH}px;background:#111d31;border:1px solid #45678f;border-radius:12px;box-shadow:0 18px 52px rgba(0,0,0,.6);font-family:Inter,"Microsoft YaHei",sans-serif;color:#eaf2ff;user-select:none;overflow:hidden}
       #${MINIMAP_ID} *{box-sizing:border-box}
-      #${MINIMAP_ID} header{display:flex;align-items:center;gap:8px;padding:9px 12px;background:linear-gradient(135deg,#1b3151,#17243b);border-bottom:1px solid #385576}
+      #${MINIMAP_ID} header{display:flex;align-items:center;gap:8px;padding:9px 12px;background:linear-gradient(135deg,#1b3151,#17243b);border-bottom:1px solid #385576;cursor:move;touch-action:none}
       #${MINIMAP_ID} .bms-mm-title{font-size:15px;font-weight:750;letter-spacing:.03em}
       #${MINIMAP_ID} .bms-mm-room{font-size:12px;color:#9eb4ce;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       #${MINIMAP_ID} .bms-mm-spacer{flex:1}
-      #${MINIMAP_ID} header button{appearance:none;width:28px;height:28px;border:1px solid #4b6e98;border-radius:7px;background:#203858;color:#f2f7ff;font-size:15px;line-height:1;cursor:pointer}
+      #${MINIMAP_ID} header button{appearance:none;width:28px;height:28px;border:1px solid #4b6e98;border-radius:7px;background:#203858;color:#f2f7ff;font-size:15px;line-height:1;cursor:pointer;flex:none}
       #${MINIMAP_ID} header button:hover{background:#2b4a72;border-color:#78a5d8}
       #${MINIMAP_ID} .bms-mm-body{display:flex;gap:12px;padding:10px 12px}
       #${MINIMAP_ID} canvas{width:${MINIMAP_CANVAS_SIZE}px;height:${MINIMAP_CANVAS_SIZE}px;flex:none;background:#0b1220;border:1px solid #2c425d;border-radius:6px;cursor:grab;touch-action:none}
       #${MINIMAP_ID} canvas.bms-mm-dragging{cursor:grabbing}
-      #${MINIMAP_ID} .bms-mm-side{flex:1;display:flex;flex-direction:column;min-width:0;border:1px solid #2c425d;border-radius:6px;background:#0f1a2c;overflow:hidden}
+      #${MINIMAP_ID} .bms-mm-side{width:${MINIMAP_SIDE_WIDTH}px;flex:none;display:flex;flex-direction:column;border:1px solid #2c425d;border-radius:6px;background:#0f1a2c;overflow:hidden}
       #${MINIMAP_ID} .bms-mm-side-title{padding:8px 10px;font-size:12px;font-weight:700;color:#9eb4ce;border-bottom:1px solid #2c425d;background:#152238}
       #${MINIMAP_ID} .bms-mm-roster{list-style:none;margin:0;padding:6px;flex:1;overflow-y:auto;min-height:0}
       #${MINIMAP_ID} .bms-mm-roster li{display:flex;gap:8px;align-items:center;padding:7px 9px;border-radius:7px;cursor:pointer;font-size:13px;border:1px solid transparent}
@@ -107,7 +110,8 @@
   function syncMinimapToggle() {
     const button = document.getElementById(MINIMAP_TOGGLE_ID);
     if (!button) return;
-    button.style.display = shouldShowMinimap() && !minimapOpen ? "" : "none";
+    // 地图房内常驻显示（面板开着时也可点击关闭），非地图房隐藏
+    button.style.display = shouldShowMinimap() ? "" : "none";
   }
 
   function ensureMinimapRoot() {
@@ -126,15 +130,33 @@
         <button data-mm="close" title="关闭">×</button>
       </header>
       <div class="bms-mm-body">
-        <canvas width="${MINIMAP_CANVAS_SIZE}" height="${MINIMAP_CANVAS_SIZE}"></canvas>
         <aside class="bms-mm-side">
           <div class="bms-mm-side-title">房间成员</div>
           <ul class="bms-mm-roster"></ul>
           <div class="bms-mm-hint">滚动缩放 · 拖拽平移 · 点击玩家选中<br>点击格子选择传送目标</div>
         </aside>
+        <canvas width="${MINIMAP_CANVAS_SIZE}" height="${MINIMAP_CANVAS_SIZE}"></canvas>
       </div>
       <footer class="bms-mm-status"></footer>`;
+    root.style.left = `${Math.max(8, Math.floor((window.innerWidth - MINIMAP_PANEL_WIDTH) / 2))}px`;
+    root.style.top = "36px";
     document.body.appendChild(root);
+
+    // 标题栏拖动面板
+    root.querySelector("header").addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      if (event.target.closest?.("button")) return; // 标题栏按钮不触发拖动
+      minimapPanelDrag = { startX: event.clientX, startY: event.clientY, left: root.offsetLeft, top: root.offsetTop };
+      root.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    });
+    root.addEventListener("pointermove", event => {
+      if (!minimapPanelDrag) return;
+      root.style.left = `${Math.max(0, minimapPanelDrag.left + event.clientX - minimapPanelDrag.startX)}px`;
+      root.style.top = `${Math.max(0, minimapPanelDrag.top + event.clientY - minimapPanelDrag.startY)}px`;
+    });
+    root.addEventListener("pointerup", () => { minimapPanelDrag = null; });
+    root.addEventListener("pointercancel", () => { minimapPanelDrag = null; });
 
     const canvas = root.querySelector("canvas");
     canvas.addEventListener("wheel", minimapHandleWheel, { passive: false });
@@ -191,12 +213,16 @@
     };
   }
 
-  function minimapCanvasToGrid(mx, my) {
-    if (!minimapGrid) return null;
-    const gx = Math.floor(mx / minimapView.zoom / minimapTileStep());
-    const gy = Math.floor(my / minimapView.zoom / minimapTileStep());
-    if (gx < 0 || gy < 0 || gx >= minimapGrid.width || gy >= minimapGrid.height) return null;
+  function minimapCanvasToGridXY(mx, my, view, grid) {
+    if (!grid) return null;
+    const gx = Math.floor((mx - view.panX) / view.zoom / minimapTileStep());
+    const gy = Math.floor((my - view.panY) / view.zoom / minimapTileStep());
+    if (gx < 0 || gy < 0 || gx >= grid.width || gy >= grid.height) return null;
     return { x: gx, y: gy };
+  }
+
+  function minimapCanvasToGrid(mx, my) {
+    return minimapCanvasToGridXY(mx, my, minimapView, minimapGrid);
   }
 
   function minimapGridToCanvas(x, y) {
