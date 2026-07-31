@@ -9,6 +9,7 @@ $parts = @(
   '02-storage.js',
   '03-exchange.js',
   '04-map-bridge.js',
+  '05-minimap.js',
   '05-ui.js',
   '06-bootstrap.js'
 )

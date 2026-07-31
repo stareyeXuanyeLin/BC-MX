@@ -15,6 +15,14 @@
         mapRoom: isMapRoom(),
         roomAdmin: isRoomAdmin(),
       }),
+      minimap: {
+        open: openMinimap,
+        close: closeMinimap,
+        toggle: toggleMinimap,
+        isOpen: () => minimapOpen,
+        teleport: teleportCharacter,
+        grid: buildMapGridSnapshot,
+      },
     });
   }
 
@@ -32,7 +40,9 @@
       try {
         modApi = bcModSdk.registerMod({ name: MOD_NAME, fullName: FULL_NAME, version: VERSION }, { allowReplace: false });
         installHooks();
+        installMinimapHooks();
         injectStyle();
+        injectMinimapStyle();
         runtimeInstalled = true;
       } catch (error) {
         duplicateInstance = /already|duplicate|registered|replace/i.test(String(error?.message || error));
@@ -77,7 +87,15 @@
       setLibrary: value => { library = normalizeLibrary(value); },
       setActiveStorageKey: value => { activeStorageKey = value; },
       shouldDrawEntryButton,
-      installHooksForTest: api => { modApi = api; installHooks(); },
+      buildMapGridSnapshot,
+      teleportCharacter,
+      createTeleportMessage,
+      isPositionWalkable,
+      tileKindOf,
+      findRoomCharacter,
+      getRoomCharacterList,
+      playerPositionSignature,
+      installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); },
       constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS },
     };
   } else {

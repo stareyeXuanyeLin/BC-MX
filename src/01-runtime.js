@@ -1,6 +1,6 @@
   const MOD_NAME = "BCMapSaver";
   const FULL_NAME = "BC Map Saver";
-  const VERSION = "0.1.2";
+  const VERSION = "0.2.0";
   const STORAGE_SCHEMA_VERSION = 1;
   const RECORD_STORAGE_VERSION = 1;
   const MAP_FILE_FORMAT = "BC_MAP_SAVER_MAP";
