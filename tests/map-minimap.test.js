@@ -405,8 +405,8 @@ test("reopening the minimap redraws the roster and only roster clicks switch sel
   // 点击地图上的另一名玩家必须建立换位目标，不能切换选中玩家
   assert.match(minimapSource, /swapWith: character\.MemberNumber/);
   assert.match(minimapSource, /地图上的玩家标记不再切换选中/);
-  // 再次点击同一目标格子确认传送或换位
-  assert.match(minimapSource, /再次点击同一目标格子 = 确认（传送或交换）/);
+  // 换位确认按目标玩家本人（允许其移动后仍可确认），传送确认按同一格子
+  assert.match(minimapSource, /确认：换位按目标玩家本人（允许其走动后仍可确认），传送按同一格子/);
   // 右键仅取消落点，不能把选中的其他成员强制切回自己
   assert.match(minimapSource, /\/\/ 右键只取消尚未确认的落点，当前选中成员保持不变。/);
   // 离开地图视角的成员在列表中明确标记为不可操作

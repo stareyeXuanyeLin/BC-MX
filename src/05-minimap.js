@@ -20,6 +20,7 @@
   const MINIMAP_TICK_MS = 250;
   const MINIMAP_DRAG_THRESHOLD = 4;
   const MINIMAP_VERIFY_DELAY_MS = 2500;
+  const MINIMAP_VERIFY_RETRY_DELAY_MS = 3000; // 校验失败后的复查等待：广播可能因原版 500ms 节流或网络延迟晚到，再等一轮避免误报
   const MINIMAP_SWAP_STEP_DELAY_MS = 1200; // 交换两步之间的间隔：等第一步传送与广播完成，避免消息乱序覆盖
   const MINIMAP_PLAYER_COLORS = ["#e8a0c0", "#8fd0ff", "#a8d68f", "#ffd08f", "#d0a8ff", "#ff9d9d", "#9df0e0", "#f0e0a0"];
   const MINIMAP_TILE_COLORS = {
@@ -666,19 +667,34 @@
         return;
       }
       toast("三步换位指令已发出，等待双方同步…", "success");
-      setTimeout(() => {
+      const verifySwapResult = () => {
         const aNow = findRoomCharacter(aMember);
         const bNow = findRoomCharacter(bMember);
         const aOk = aNow?.MapData?.Pos?.X === finalA.x && aNow?.MapData?.Pos?.Y === finalA.y;
         const bOk = bNow?.MapData?.Pos?.X === finalB.x && bNow?.MapData?.Pos?.Y === finalB.y;
-        if (!aNow || !bNow) {
+        return { aNow, bNow, aOk, bOk };
+      };
+      const reportSwapResult = result => {
+        if (!result.aNow || !result.bNow) {
           toast("目标已不在房间，换位可能未生效", "error");
-        } else if (aOk && bOk) {
+        } else if (result.aOk && result.bOk) {
           toast("换位成功：双方已到达彼此原位置", "success");
         } else {
           toast("换位尚未完全同步：若目标处于聊天视图，切回地图视图后自动生效", "error");
         }
-        finishSwap();
+      };
+      setTimeout(() => {
+        const first = verifySwapResult();
+        if (first.aOk && first.bOk) {
+          reportSwapResult(first);
+          finishSwap();
+          return;
+        }
+        // 广播可能因原版节流或网络延迟晚到：复查一轮再下结论，避免误报失败
+        setTimeout(() => {
+          reportSwapResult(verifySwapResult());
+          finishSwap();
+        }, MINIMAP_VERIFY_RETRY_DELAY_MS);
       }, MINIMAP_VERIFY_DELAY_MS);
     };
     runNextStep();
@@ -773,10 +789,18 @@
       drawMinimap();
       return;
     }
-    // 再次点击同一目标格子 = 确认（传送或交换）
-    if (minimapPending && minimapPending.member === minimapSelected && minimapPending.x === gx && minimapPending.y === gy) {
-      confirmMinimapPending();
-      return;
+    // 确认：换位按目标玩家本人（允许其走动后仍可确认），传送按同一格子
+    if (minimapPending && minimapPending.member === minimapSelected) {
+      if (minimapPending.swapWith != null) {
+        const hit = findRoomCharacterAt(gx, gy);
+        if (hit && hit.MemberNumber === minimapPending.swapWith) {
+          confirmMinimapPending();
+          return;
+        }
+      } else if (minimapPending.x === gx && minimapPending.y === gy) {
+        confirmMinimapPending();
+        return;
+      }
     }
     const character = findRoomCharacterAt(gx, gy);
     if (character) {
