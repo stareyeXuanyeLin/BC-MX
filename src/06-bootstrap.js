@@ -118,6 +118,7 @@
       viewportGridToCanvasXY,
       buildEditorMaterials,
       filterEditorMaterials,
+      editorStyleLabel,
       editorMaterialOwned,
       editorBrushCells,
       applyEditorStroke,

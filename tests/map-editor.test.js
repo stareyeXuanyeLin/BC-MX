@@ -74,11 +74,16 @@ test("editor viewport coordinates round-trip with shared pan and zoom math", () 
   assert.equal(api.editorCanvasToGridXY(-9999, -9999, view, size), null);
 });
 
-test("brush cell selection clips a 1-5 range square to map bounds", () => {
+test("brush size is an exact 1x1 through 5x5 square anchored at the pointer cell", () => {
   const { api } = createRuntime();
   assert.deepEqual(plain(api.editorBrushCells(10, 10, 1, 40, 40)), [{ x: 10, y: 10, index: 410 }]);
-  assert.equal(api.editorBrushCells(10, 10, 3, 40, 40).length, 25);
-  assert.equal(api.editorBrushCells(0, 0, 5, 40, 40).length, 25);
+  assert.deepEqual(plain(api.editorBrushCells(10, 10, 2, 40, 40)), [
+    { x: 10, y: 10, index: 410 }, { x: 11, y: 10, index: 411 },
+    { x: 10, y: 11, index: 450 }, { x: 11, y: 11, index: 451 },
+  ]);
+  assert.equal(api.editorBrushCells(10, 10, 3, 40, 40).length, 9);
+  assert.equal(api.editorBrushCells(10, 10, 5, 40, 40).length, 25);
+  assert.equal(api.editorBrushCells(39, 39, 5, 40, 40).length, 1);
 });
 
 test("tile and object brush writes use UTF-16 map strings", () => {
@@ -93,14 +98,14 @@ test("tile and object brush writes use UTF-16 map strings", () => {
   assert.equal(mapData.Objects.charCodeAt(123), 2030);
 });
 
-test("unique object write removes prior copies and keeps only the final brush cell", () => {
+test("unique object write removes prior copies and keeps only the first brush cell", () => {
   const { api, context } = createRuntime();
   const mapData = context.ChatRoomData.MapData;
   mapData.Objects = String.fromCharCode(777) + mapData.Objects.slice(1, 800) + String.fromCharCode(777) + mapData.Objects.slice(801);
   const cells = [{ index: 10 }, { index: 11 }, { index: 12 }];
   assert.equal(api.applyEditorStroke(mapData, "object", 777, cells, { ID: 777, Unique: true }), true);
   assert.equal(countCode(mapData.Objects, 777), 1);
-  assert.equal(mapData.Objects.charCodeAt(12), 777);
+  assert.equal(mapData.Objects.charCodeAt(10), 777);
   assert.equal(mapData.Objects.charCodeAt(0), api.constants.EDITOR_OBJECT_BLANK_ID);
   assert.equal(mapData.Objects.charCodeAt(800), api.constants.EDITOR_OBJECT_BLANK_ID);
 });
@@ -134,14 +139,17 @@ test("undo and redo keep snapshots and cap undo history at 100", () => {
   assert.equal(history.redo.length, 0);
 });
 
-test("material filtering searches across type, style and id", () => {
+test("materials use simplified Chinese labels and remain searchable by Chinese, style and id", () => {
   const { api } = createRuntime();
   const lookup = {
     100: { ID: 100, Type: "Floor", Style: "Stone" },
     200: { ID: 200, Type: "Wall", Style: "Brick" },
+    300: { ID: 300, Type: "FloorNumber", Style: "Number7" },
   };
   const materials = api.buildEditorMaterials("tile", lookup);
+  assert.deepEqual(plain(materials).map(item => item.label), ["石材", "数字 7", "砖墙"]);
   assert.deepEqual(plain(api.filterEditorMaterials(materials, "Floor")).map(item => item.id), [100]);
+  assert.deepEqual(plain(api.filterEditorMaterials(materials, "", "砖墙")).map(item => item.id), [200]);
   assert.deepEqual(plain(api.filterEditorMaterials(materials, "", "brick")).map(item => item.id), [200]);
   assert.deepEqual(plain(api.filterEditorMaterials(materials, "", "100")).map(item => item.id), [100]);
 });
@@ -161,6 +169,16 @@ test("asset-bound objects are greyed logically when inventory ownership is missi
     { id: 501, owned: true },
     { id: 502, owned: false },
   ]);
+});
+
+test("editor UI wraps categories, fills the viewport and uses right-button panning", () => {
+  const editorSource = fs.readFileSync(path.join(root, "src", "05-editor.js"), "utf8");
+  assert.match(editorSource, /width:calc\(100vw - 16px\);height:calc\(100vh - 16px\)/);
+  assert.match(editorSource, /\.bms-ed-categories\{[^}]*flex-wrap:wrap/);
+  assert.doesNotMatch(editorSource, /\.bms-ed-categories\{[^}]*overflow-x:auto/);
+  assert.doesNotMatch(editorSource, /data-tool="pan"/);
+  assert.match(editorSource, /event\.button === 2 \|\| event\.button === 1/);
+  assert.doesNotMatch(editorSource, /temporaryEraser/);
 });
 
 test("editor entry requires admin map view and no native edit submode", () => {

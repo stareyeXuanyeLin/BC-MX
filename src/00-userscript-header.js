@@ -2,7 +2,7 @@
 // @name         Bondage Club - BCMX（核心脚本）
 // @name:zh-CN   Bondage Club - 地图功能强化（核心脚本）
 // @namespace    https://github.com/stareyeXuanyeLin/BC-MX
-// @version      0.3.0
+// @version      0.3.1
 // @description  Bondage Club 地图功能强化：本地存档、小地图、管理员传送与自由地图编辑器。
 // @description:zh-CN 地图功能强化：本地保存与重建聊天室地图、小地图实时概览、管理员传送与自由地图编辑。
 // @author       林宣夜＆佩菈

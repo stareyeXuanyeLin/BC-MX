@@ -18,15 +18,53 @@
   const EDITOR_LAYER_TILE = "tile";
   const EDITOR_LAYER_OBJECT = "object";
   const EDITOR_OBJECT_BLANK_ID = 100;
-  const EDITOR_TOOL_PAN = "pan";
   const EDITOR_TOOL_BRUSH = "brush";
   const EDITOR_TOOL_ERASER = "eraser";
   const EDITOR_CATEGORY_LABELS = Object.freeze({
-    Floor: "地板", FloorExterior: "室外", Wall: "墙壁", Water: "水面",
+    Floor: "室内地面", FloorExterior: "室外地面", Wall: "墙壁", Water: "水面",
     FloorDecoration: "地面装饰", FloorDecorationThemed: "主题装饰", FloorDecorationParty: "派对装饰",
-    FloorDecorationCamping: "露营装饰", FloorDecorationExpanding: "扩展装饰", FloorItem: "地面物品",
-    FloorObstacle: "障碍", FloorNumber: "数字", FloorLetter: "字母", FloorIcon: "图标",
-    WallDecoration: "墙饰", WallPath: "墙面路径", Banners: "横幅",
+    FloorDecorationCamping: "露营装饰", FloorDecorationExpanding: "扩展装饰", FloorDecorationAnimal: "动物装饰",
+    FloorItem: "大型设施", FloorObstacle: "障碍物", FloorNumber: "数字", FloorLetter: "字母", FloorIcon: "地面图标",
+    WallDecoration: "墙面装饰", WallPath: "门与通道", Banners: "旗帜",
+  });
+  const EDITOR_STYLE_LABELS = Object.freeze({
+    OakWood: "橡木地板", Stone: "石材", Pavement: "铺路砖", Ceramic: "浅色陶瓷", CeramicDark: "深色陶瓷",
+    CarpetPink: "粉色地毯", CarpetBlue: "蓝色地毯", CarpetRed: "红色地毯", Padded: "软垫", LatexFloor: "乳胶地板",
+    Tile: "瓷砖", HexBlue: "蓝色六边形", HexPurple: "紫色六边形", Machine: "机械地板", HalfWall: "半墙",
+    Dirt: "泥土", Grass: "草地", LongGrass: "茂密草地", Sand: "沙地", Gravel: "碎石地", Asphalt: "沥青地",
+    Snow: "雪地", StoneSquareGray: "灰色方石", ScatteredLeaves: "散落树叶", ScatteredLeavesDirt: "泥地落叶", ScatteredLeavesThick: "浓密落叶",
+    MixedWood: "混合木墙", CedarWood: "雪松木墙", Log: "原木墙", Japanese: "日式墙", Brick: "砖墙", Dungeon: "地牢墙",
+    Square: "方块墙", Steel: "钢墙", Lattice: "格栅墙", PipeBlue: "蓝色管线墙", PipePurple: "紫色管线墙", SteelBlack: "黑色钢墙", SteelGary: "灰色钢墙",
+    Pool: "泳池水", Sea: "海水", Ocean: "海洋", OceanCyan: "青色海洋", OceanCalm: "平静海面", Swamp: "沼泽", Waves: "波浪", Shallow: "浅水", Lava: "熔岩",
+    EntryFlag: "入口旗", ExitFlag: "出口旗", BedTeal: "青绿色床", PillowPink: "粉色枕头", TableBrown: "棕色桌子", ChairWood: "木椅",
+    ThroneRed: "红色王座", KeyBronze: "青铜钥匙", KeySilver: "白银钥匙", KeyGold: "黄金钥匙", VikingChair: "维京椅", Bed: "床", Stairs: "楼梯", AirConditioner: "空调",
+    TeacherDesk: "讲台", StudentDesk: "课桌", SinkDishes: "餐具水槽", LaundryMachine: "洗衣机", IroningBoard: "熨衣板", ShibariFrame: "绳缚架",
+    JapaneseTable: "日式矮桌", BanzaiTree: "盆景树", MedicalDesk: "医疗桌", Toilet: "马桶", DeskBlue: "蓝色桌子", DeskPurple: "紫色桌子",
+    ConsoleLeft: "控制台左段", ConsoleRight: "控制台右段", LongDeskLeft: "长桌左段", LongDeskRight: "长桌右段", Cabinet: "柜子",
+    Television: "电视正面", TelevisionBack: "电视背面", Wardrobe: "衣柜", StandingBellflowerBanner: "立式桔梗旗", BondageClubBanner: "拘束俱乐部旗",
+    VoidOrderBanner: "虚空教团旗", KatanaOnStand: "刀架上的武士刀", MagicMark: "魔法印记",
+    BalloonFiveColor: "五色气球", BalloonTwoHeart: "双爱心气球", WeddingCake: "婚礼蛋糕", WeddingArch: "婚礼拱门", FlowerVasePink: "粉色花瓶",
+    BeachUmbrellaStripe: "条纹沙滩伞", BeachTowelStripe: "条纹沙滩巾", Speaker: "音箱", Presents: "礼物堆",
+    LogFire: "原木篝火", LogFireAnim0: "动态原木篝火", LogSingle: "单根原木", TentBlue: "蓝色帐篷", SleepingBagBlue: "蓝色睡袋", ChairRed: "红色椅子",
+    Hurdle1: "障碍栏一", Hurdle2: "障碍栏二", Hurdle3: "障碍栏三", CouchPinkPreview: "粉色沙发组合", BedBluePreview: "蓝色床组合",
+    BallPitPreview: "海洋球池组合", VikingTablePreview: "维京桌组合", RailroadPreview: "铁路组合",
+    CatCaramelHappy: "开心的焦糖色猫", DogBrownHappy: "开心的棕色狗", RabbitBrownStand: "站立的棕色兔", ChickenBrownIdleLeft: "向左待机的棕色鸡",
+    Kennel: "狗笼", "X-Cross": "X 形架", BondageBench: "拘束长凳", Trolley: "推车", Locker: "储物柜", WoodenBox: "木箱", Coffin: "棺材",
+    TheDisplayFrame: "展示架", Pole: "立柱", MedicalBed: "医疗床", FuturisticCrate: "未来风货箱",
+    Stalagmite: "石笋", Rocks: "岩石", GoldStones: "金色石块", StonePile: "石堆", Statue: "雕像", Knight: "骑士像", Samurai: "武士像", Totem: "图腾",
+    EasterIsland: "复活节岛石像", OrderOfTheVoidTotem: "虚空教团图腾", Barrel: "木桶", Chest: "宝箱", IronBars: "铁栅栏", BarbFence: "铁丝围栏",
+    PicketFence: "尖桩围栏", VelourRopeBarrier: "丝绒绳护栏", Bush: "灌木", OakTree: "橡树", OakTree_Fall: "倒下的橡树", LeaflessTree: "枯树",
+    PineTree: "松树", PalmTree: "棕榈树", Sakura: "樱花树", Cactus: "仙人掌", ChristmasTree: "圣诞树", Window: "窗户", TrashCan: "垃圾桶",
+    RoadCone: "路锥", LampPost: "路灯", Pillar: "立柱", Painting: "画作", Mirror: "镜子", Candelabra0: "烛台", Whip: "鞭子", Fireplace: "壁炉",
+    Stocking: "圣诞袜", Moss: "苔藓", Vines: "藤蔓", Vines2: "茂密藤蔓", SilverShield: "银色盾牌", CrossedSabers: "交叉军刀",
+    WindowNight: "夜景窗户", StainedGlass: "彩绘玻璃", SchoolBoard: "学校黑板", FirstAidKit: "急救箱", EyeTest: "视力表", Scroll: "卷轴",
+    Wanted: "通缉令", Bookshelf: "书架", ShowerHead: "淋浴喷头", EnemaHead: "灌肠喷头", MonitorSmall: "小显示器", MonitorBigLeft: "大显示器左段", MonitorBigRight: "大显示器右段",
+    WoodOpen: "木门打开", WoodClosed: "木门关闭", WoodLocked: "木门上锁", WoodLockedBronze: "青铜锁木门", WoodLockedSilver: "白银锁木门", WoodLockedGold: "黄金锁木门",
+    Metal: "金属门", MetalUp: "金属门上段", MetalDown: "金属门下段", MetalLockedBronze: "青铜锁金属门", MetalLockedSilver: "白银锁金属门", MetalLockedGold: "黄金锁金属门",
+    BrownDoor: "棕色门", BrownDoorOpen: "打开的棕色门", RoyalDoor: "皇家门", RoyalDoorOpen: "打开的皇家门", SteelDoor: "钢门", SteelDoorOpen: "打开的钢门", GrayDoor: "灰色门", GrayDoorOpen: "打开的灰色门",
+    Red: "红色旗帜", Blue: "蓝色旗帜", Green: "绿色旗帜", Yellow: "黄色旗帜", Black: "黑色旗帜", PaladinBanner: "圣骑士团旗",
+    ServiOrdinisBanner: "秩序仆从旗", BellflowerBanner: "桔梗旗", BondageClub: "拘束俱乐部旗", Inquisition: "审判庭旗",
+    MagesSacrosanctorum: "神圣法师团旗", MaidSorority: "女仆姐妹会旗", Priesthood: "祭司团旗", VoidOrder: "虚空教团旗",
   });
 
   let editorOpen = false;
@@ -119,6 +157,20 @@
     }
   }
 
+  function editorStyleLabel(style, id) {
+    const name = String(style || "");
+    if (EDITOR_STYLE_LABELS[name]) return EDITOR_STYLE_LABELS[name];
+    let match = /^Number(\d)$/.exec(name);
+    if (match) return `数字 ${match[1]}`;
+    match = /^Letter([A-Z])$/.exec(name);
+    if (match) return `字母 ${match[1]}`;
+    const iconLabels = {
+      IconCircle: "圆形图标", IconSquare: "方形图标", IconTriangle: "三角形图标", IconCross: "叉号图标", IconDiamond: "菱形图标",
+      IconArrowUp: "向上箭头", IconArrowDown: "向下箭头", IconArrowLeft: "向左箭头", IconArrowRight: "向右箭头",
+    };
+    return iconLabels[name] || `素材 ${id}`;
+  }
+
   function buildEditorMaterials(layer, lookup, player = getPlayerCharacter(), inventoryAvailable = getInventoryAvailable()) {
     return lookupValues(lookup)
       .filter(item => layer !== EDITOR_LAYER_OBJECT || (item.ID !== EDITOR_OBJECT_BLANK_ID && item.Style !== "Blank"))
@@ -127,6 +179,7 @@
         layer,
         type: String(item.Type || "Other"),
         style: String(item.Style || item.ID),
+        label: editorStyleLabel(item.Style, item.ID),
         owned: layer === EDITOR_LAYER_TILE || editorMaterialOwned(item, player, inventoryAvailable),
         unique: item.Unique === true,
         definition: item,
@@ -139,7 +192,7 @@
     return materials.filter(material => {
       if (!normalized && category && category !== "recent" && material.type !== category) return false;
       if (!normalized) return true;
-      return `${material.type} ${material.style} ${material.id}`.toLocaleLowerCase().includes(normalized);
+      return `${material.type} ${material.style} ${material.label} ${material.id}`.toLocaleLowerCase().includes(normalized);
     });
   }
 
@@ -192,9 +245,10 @@
 
   function editorBrushCells(cx, cy, range, width, height) {
     const cells = [];
-    const radius = Math.max(0, Math.min(4, Number(range) - 1));
-    for (let y = cy - radius; y <= cy + radius; y++) {
-      for (let x = cx - radius; x <= cx + radius; x++) {
+    const side = Math.max(1, Math.min(5, Math.floor(Number(range) || 1)));
+    // 指针格固定为左上角，画笔数字严格对应 N×N；偶数尺寸不再产生方向歧义。
+    for (let y = cy; y < cy + side; y++) {
+      for (let x = cx; x < cx + side; x++) {
         if (x >= 0 && y >= 0 && x < width && y < height) cells.push({ x, y, index: y * width + x });
       }
     }
@@ -220,7 +274,7 @@
       const blank = String.fromCharCode(EDITOR_OBJECT_BLANK_ID);
       const target = String.fromCharCode(writeId);
       next = next.split(target).join(blank);
-      const cell = valid[valid.length - 1]; // 与原版逐格“先清唯一项再写入”一致，最终只保留最后一个落点
+      const cell = valid[0]; // 对齐原版：Unique 只写画笔选区中的第一个有效格
       next = replaceEncodedCell(next, cell.index, writeId);
     } else {
       for (const cell of valid) next = replaceEncodedCell(next, cell.index, writeId);
@@ -274,11 +328,11 @@
     }
   }
 
-  function editorApplyAt(gx, gy, temporaryEraser = false) {
+  function editorApplyAt(gx, gy) {
     assertRoomMapAction(); // 每次落笔重新验权，避免打开后权限变化绕过入口检查
     const mapData = editorMapData();
     const size = getChatRoomMapViewSize();
-    const erasing = temporaryEraser || editorTool === EDITOR_TOOL_ERASER;
+    const erasing = editorTool === EDITOR_TOOL_ERASER;
     const material = editorSelected?.layer === editorLayer ? editorSelected : null;
     if (!erasing && !material) return false;
     const cells = editorBrushCells(gx, gy, editorBrushSize, size.width, size.height);
@@ -309,7 +363,7 @@
     const style = document.createElement("style");
     style.id = "bms-editor-style";
     style.textContent = `
-      #${EDITOR_ID}{position:fixed;z-index:99992;width:min(1120px,calc(100vw - 24px));height:min(720px,calc(100vh - 24px));background:#111d31;border:1px solid #45678f;border-radius:12px;box-shadow:0 18px 52px rgba(0,0,0,.6);font-family:Inter,"Microsoft YaHei",sans-serif;color:#eaf2ff;user-select:none;overflow:hidden;display:flex;flex-direction:column}
+      #${EDITOR_ID}{position:fixed;z-index:99992;width:calc(100vw - 16px);height:calc(100vh - 16px);background:#111d31;border:1px solid #45678f;border-radius:12px;box-shadow:0 18px 52px rgba(0,0,0,.6);font-family:Inter,"Microsoft YaHei",sans-serif;color:#eaf2ff;user-select:none;overflow:hidden;display:flex;flex-direction:column}
       #${EDITOR_ID} *{box-sizing:border-box}
       #${EDITOR_ID} button,#${EDITOR_ID} input{font:inherit}
       #${EDITOR_ID} .bms-ed-header{height:46px;display:flex;align-items:center;gap:8px;padding:8px 12px;background:linear-gradient(135deg,#1b3151,#17243b);border-bottom:1px solid #385576;cursor:move;touch-action:none;flex:none}
@@ -321,26 +375,26 @@
       #${EDITOR_ID} button:disabled{opacity:.42;cursor:not-allowed}
       #${EDITOR_ID} button.bms-ed-active{background:#2b4a72;border-color:#78a5d8;box-shadow:inset 0 0 0 1px rgba(120,165,216,.35)}
       #${EDITOR_ID} .bms-ed-header button{width:30px;height:30px;font-size:14px;flex:none}
-      #${EDITOR_ID} .bms-ed-body{display:grid;grid-template-columns:minmax(440px,1fr) 340px;gap:10px;padding:10px;min-height:0;flex:1}
+      #${EDITOR_ID} .bms-ed-body{display:grid;grid-template-columns:minmax(520px,1fr) clamp(400px,32vw,560px);gap:10px;padding:10px;min-height:0;flex:1}
       #${EDITOR_ID} .bms-ed-workspace{min-width:0;display:flex;flex-direction:column;gap:8px}
       #${EDITOR_ID} .bms-ed-tools{display:flex;align-items:center;gap:6px;min-height:38px;padding:5px 7px;border:1px solid #2c425d;border-radius:7px;background:#0f1a2c;overflow-x:auto}
       #${EDITOR_ID} .bms-ed-tools button{height:28px;padding:0 10px;white-space:nowrap;font-size:12px}
       #${EDITOR_ID} .bms-ed-tools .bms-ed-size{width:28px;padding:0}
       #${EDITOR_ID} .bms-ed-divider{width:1px;height:22px;background:#385576;flex:none;margin:0 2px}
       #${EDITOR_ID} .bms-ed-canvas-wrap{position:relative;min-height:0;flex:1;border:1px solid #2c425d;border-radius:7px;background:#09111e;overflow:hidden}
-      #${EDITOR_ID} .bms-ed-canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
+      #${EDITOR_ID} .bms-ed-canvas{display:block;width:100%;height:100%;touch-action:none;overscroll-behavior:none;cursor:crosshair}
       #${EDITOR_ID} .bms-ed-canvas.bms-ed-panning{cursor:grabbing}
       #${EDITOR_ID} .bms-ed-coordinate{position:absolute;left:8px;bottom:8px;padding:3px 7px;border-radius:5px;background:rgba(5,11,20,.78);color:#9edcff;font:12px Consolas,monospace;pointer-events:none}
       #${EDITOR_ID} .bms-ed-canvas-hint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);max-width:320px;text-align:center;color:#9eb4ce;background:rgba(9,17,30,.86);border:1px solid #385576;border-radius:8px;padding:10px 14px;pointer-events:none}
       #${EDITOR_ID} .bms-ed-palette{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid #2c425d;border-radius:7px;background:#0f1a2c;overflow:hidden}
       #${EDITOR_ID} .bms-ed-layer-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:8px;border-bottom:1px solid #2c425d}
       #${EDITOR_ID} .bms-ed-layer-tabs button{height:34px;font-weight:700}
-      #${EDITOR_ID} .bms-ed-categories{display:flex;gap:6px;padding:8px;overflow-x:auto;border-bottom:1px solid #2c425d;flex:none}
-      #${EDITOR_ID} .bms-ed-categories button{height:28px;padding:0 9px;white-space:nowrap;font-size:12px}
+      #${EDITOR_ID} .bms-ed-categories{display:flex;flex-wrap:wrap;align-content:flex-start;gap:6px;padding:8px;border-bottom:1px solid #2c425d;flex:none}
+      #${EDITOR_ID} .bms-ed-categories button{height:28px;padding:0 10px;white-space:nowrap;font-size:12px;flex:0 0 auto}
       #${EDITOR_ID} .bms-ed-search-wrap{padding:8px;border-bottom:1px solid #2c425d}
       #${EDITOR_ID} .bms-ed-search{width:100%;height:32px;border:1px solid #385576;border-radius:7px;background:#0a1423;color:#eaf2ff;padding:0 10px;outline:none;user-select:text}
       #${EDITOR_ID} .bms-ed-search:focus{border-color:#78a5d8}
-      #${EDITOR_ID} .bms-ed-assets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-content:start;gap:8px;padding:8px;overflow-y:auto;min-height:0;flex:1}
+      #${EDITOR_ID} .bms-ed-assets{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));align-content:start;gap:8px;padding:8px;overflow-y:auto;min-height:0;flex:1}
       #${EDITOR_ID} .bms-ed-asset{position:relative;height:68px;padding:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0}
       #${EDITOR_ID} .bms-ed-asset img{width:45px;height:45px;object-fit:contain;image-rendering:auto;pointer-events:none}
       #${EDITOR_ID} .bms-ed-asset span{width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:#b9cde6;text-align:center}
@@ -352,7 +406,7 @@
       #${EDITOR_ID} .bms-ed-selection strong{color:#8fd0ff}
       #${EDITOR_ID} .bms-ed-status{height:34px;padding:7px 12px;border-top:1px solid #385576;background:#0d1829;color:#9eb4ce;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none}
       #${EDITOR_ID} .bms-ed-status .bms-ed-warn{color:#ffc981}
-      @media(max-width:900px){#${EDITOR_ID} .bms-ed-body{grid-template-columns:minmax(360px,1fr) 300px}#${EDITOR_ID} .bms-ed-assets{grid-template-columns:repeat(3,minmax(0,1fr))}}
+      @media(max-width:1050px){#${EDITOR_ID} .bms-ed-body{grid-template-columns:minmax(400px,1fr) minmax(340px,42vw)}}
     `;
     document.head.appendChild(style);
   }
@@ -370,7 +424,7 @@
       <div class="bms-ed-body">
         <main class="bms-ed-workspace">
           <nav class="bms-ed-tools">
-            <button data-tool="pan">平移</button><button data-tool="brush">画笔</button><button data-tool="eraser">橡皮</button><span class="bms-ed-divider"></span>
+            <button data-tool="brush">画笔</button><button data-tool="eraser">橡皮</button><span class="bms-ed-divider"></span>
             <span style="font-size:12px;color:#9eb4ce;white-space:nowrap">大小</span>
             ${[1, 2, 3, 4, 5].map(size => `<button class="bms-ed-size" data-size="${size}">${size}</button>`).join("")}
             <span class="bms-ed-divider"></span><button data-ed="undo">撤销</button><button data-ed="redo">重做</button>
@@ -384,8 +438,8 @@
           <div class="bms-ed-assets"></div><div class="bms-ed-selection"></div>
         </aside>
       </div><footer class="bms-ed-status"></footer>`;
-    root.style.left = `${Math.max(6, Math.floor((window.innerWidth - Math.min(1120, window.innerWidth - 24)) / 2))}px`;
-    root.style.top = `${Math.max(6, Math.floor((window.innerHeight - Math.min(720, window.innerHeight - 24)) / 2))}px`;
+    root.style.left = "8px";
+    root.style.top = "8px";
     document.body.appendChild(root);
 
     const header = root.querySelector(".bms-ed-header");
@@ -397,8 +451,10 @@
     });
     header.addEventListener("pointermove", event => {
       if (!editorPanelDrag) return;
-      root.style.left = `${Math.max(0, Math.min(window.innerWidth - 80, editorPanelDrag.left + event.clientX - editorPanelDrag.startX))}px`;
-      root.style.top = `${Math.max(0, Math.min(window.innerHeight - 46, editorPanelDrag.top + event.clientY - editorPanelDrag.startY))}px`;
+      const maxLeft = Math.max(0, window.innerWidth - root.offsetWidth);
+      const maxTop = Math.max(0, window.innerHeight - root.offsetHeight);
+      root.style.left = `${Math.max(0, Math.min(maxLeft, editorPanelDrag.left + event.clientX - editorPanelDrag.startX))}px`;
+      root.style.top = `${Math.max(0, Math.min(maxTop, editorPanelDrag.top + event.clientY - editorPanelDrag.startY))}px`;
     });
     header.addEventListener("pointerup", () => { editorPanelDrag = null; });
     header.addEventListener("pointercancel", () => { editorPanelDrag = null; });
@@ -415,7 +471,9 @@
     canvas.addEventListener("pointerup", editorHandlePointerUp);
     canvas.addEventListener("pointercancel", editorHandlePointerUp);
     canvas.addEventListener("pointerleave", () => { editorHover = null; updateEditorCoordinate(); drawEditorViewport(); });
-    canvas.addEventListener("contextmenu", event => event.preventDefault());
+    const blockBrowserMouseGesture = event => { event.preventDefault(); event.stopPropagation(); };
+    canvas.addEventListener("contextmenu", blockBrowserMouseGesture);
+    canvas.addEventListener("auxclick", blockBrowserMouseGesture);
     return root;
   }
 
@@ -428,7 +486,7 @@
     else if (action === "redo") editorPerformHistory("redo");
 
     const tool = event.target.closest?.("[data-tool]")?.dataset.tool;
-    if ([EDITOR_TOOL_PAN, EDITOR_TOOL_BRUSH, EDITOR_TOOL_ERASER].includes(tool)) {
+    if ([EDITOR_TOOL_BRUSH, EDITOR_TOOL_ERASER].includes(tool)) {
       editorTool = tool;
       renderEditorControls();
       drawEditorViewport();
@@ -483,7 +541,10 @@
     const categories = [...new Set(materials.map(item => item.type))];
     const recent = editorRecent.filter(item => item.layer === editorLayer && materials.some(current => current.id === item.id));
     const categoryHost = root.querySelector(".bms-ed-categories");
-    categoryHost.innerHTML = `${recent.length ? '<button data-category="recent">最近</button>' : ""}${categories.map(type => `<button data-category="${escapeHTML(type)}" title="${escapeHTML(type)}">${escapeHTML(EDITOR_CATEGORY_LABELS[type] || type)}</button>`).join("")}`;
+    categoryHost.innerHTML = `${recent.length ? '<button data-category="recent">最近</button>' : ""}${categories.map(type => {
+      const label = EDITOR_CATEGORY_LABELS[type] || "其他分类";
+      return `<button data-category="${escapeHTML(type)}" title="${escapeHTML(label)}">${escapeHTML(label)}</button>`;
+    }).join("")}`;
     categoryHost.querySelectorAll("[data-category]").forEach(button => button.classList.toggle("bms-ed-active", !editorQuery && button.dataset.category === editorCategory[editorLayer]));
 
     let visible;
@@ -494,13 +555,13 @@
     assets.innerHTML = visible.length ? visible.map(material => {
       const selected = editorSelected?.layer === material.layer && editorSelected.id === material.id;
       const title = material.owned
-        ? `${material.type} / ${material.style} · ID ${material.id}`
+        ? `${EDITOR_CATEGORY_LABELS[material.type] || "其他素材"} / ${material.label} · ID ${material.id}`
         : `需要持有 ${material.definition.AssetGroup} / ${material.definition.AssetName}`;
-      return `<button class="bms-ed-asset${selected ? " bms-ed-selected" : ""}${material.owned ? "" : " bms-ed-locked"}" data-asset-id="${material.id}" title="${escapeHTML(title)}" ${material.owned ? "" : "disabled"}><img src="${escapeHTML(editorMaterialPath(material))}" alt=""><span>${escapeHTML(material.style)}</span></button>`;
+      return `<button class="bms-ed-asset${selected ? " bms-ed-selected" : ""}${material.owned ? "" : " bms-ed-locked"}" data-asset-id="${material.id}" title="${escapeHTML(title)}" ${material.owned ? "" : "disabled"}><img src="${escapeHTML(editorMaterialPath(material))}" alt=""><span>${escapeHTML(material.label)}</span></button>`;
     }).join("") : '<div class="bms-ed-empty">没有匹配的素材</div>';
     const selection = root.querySelector(".bms-ed-selection");
     selection.innerHTML = editorSelected
-      ? `当前：<strong>${editorSelected.layer === EDITOR_LAYER_TILE ? "地块" : "物件"} · ${escapeHTML(editorSelected.type)} / ${escapeHTML(editorSelected.style)}</strong>`
+      ? `当前：<strong>${editorSelected.layer === EDITOR_LAYER_TILE ? "地块" : "物件"} · ${escapeHTML(EDITOR_CATEGORY_LABELS[editorSelected.type] || "其他素材")} / ${escapeHTML(editorSelected.label)}</strong>`
       : `当前：<strong>${editorLayer === EDITOR_LAYER_TILE ? "请选择地块" : "请选择物件"}</strong>`;
   }
 
@@ -515,7 +576,7 @@
     if (undo) undo.disabled = editorHistory.undo.length === 0;
     if (redo) redo.disabled = editorHistory.redo.length === 0;
     const hint = root.querySelector(".bms-ed-canvas-hint");
-    if (hint) hint.hidden = editorTool === EDITOR_TOOL_PAN || editorTool === EDITOR_TOOL_ERASER || editorSelected?.layer === editorLayer;
+    if (hint) hint.hidden = editorTool === EDITOR_TOOL_ERASER || editorSelected?.layer === editorLayer;
     updateEditorStatus();
   }
 
@@ -524,7 +585,7 @@
     if (!status) return;
     const hover = editorHover ? `格子 (${editorHover.x}, ${editorHover.y}) · ` : "";
     const failures = editorImageFailures > 0 ? ` · <span class="bms-ed-warn">${editorImageFailures} 个素材加载失败</span>` : "";
-    status.innerHTML = `${hover}画笔 ${editorBrushSize} · 缩放 ${Math.round(editorView.zoom * 100)}% · 撤销 ${editorHistory.undo.length} / 重做 ${editorHistory.redo.length}${failures}`;
+    status.innerHTML = `${hover}画笔 ${editorBrushSize}×${editorBrushSize} · 右键拖拽平移 · 缩放 ${Math.round(editorView.zoom * 100)}% · 撤销 ${editorHistory.undo.length} / 重做 ${editorHistory.redo.length}${failures}`;
   }
 
   function updateEditorCoordinate() {
@@ -674,10 +735,10 @@
   }
 
   function drawEditorHover(ctx) {
-    if (!editorHover || editorTool === EDITOR_TOOL_PAN) return;
+    if (!editorHover || editorPointer?.panning) return;
     const size = getChatRoomMapViewSize();
     const cells = editorBrushCells(editorHover.x, editorHover.y, editorBrushSize, size.width, size.height);
-    const erasing = editorTool === EDITOR_TOOL_ERASER || editorPointer?.temporaryEraser;
+    const erasing = editorTool === EDITOR_TOOL_ERASER;
     const preview = !erasing && editorSelected?.layer === editorLayer ? getEditorImage(editorMaterialPath(editorSelected)) : null;
     ctx.save();
     for (const cell of cells) {
@@ -720,13 +781,15 @@
 
   function editorHandlePointerDown(event) {
     const canvas = event.currentTarget;
-    const panning = event.button === 1 || (event.button === 0 && (editorTool === EDITOR_TOOL_PAN || editorSpaceDown));
+    // 右键或中键始终平移；空格+左键保留为键盘快捷方式。阻止默认行为以压制浏览器菜单与页面手势。
+    const panning = event.button === 2 || event.button === 1 || (event.button === 0 && editorSpaceDown);
     const drawing = event.button === 0 && !panning;
-    const temporaryEraser = event.button === 2;
-    if (!panning && !drawing && !temporaryEraser) return;
+    if (!panning && !drawing) return;
+    event.preventDefault();
+    event.stopPropagation();
     canvas.setPointerCapture?.(event.pointerId);
     editorPointer = {
-      pointerId: event.pointerId, panning, drawing: drawing || temporaryEraser, temporaryEraser,
+      pointerId: event.pointerId, panning, drawing,
       startX: event.clientX, startY: event.clientY, panX: editorView.panX, panY: editorView.panY, lastIndex: -1,
       beforeSnapshot: panning ? null : editorSnapshot(editorMapData()), historyRecorded: false,
     };
@@ -761,7 +824,7 @@
     if (editorPointer.lastIndex === index) return;
     editorPointer.lastIndex = index;
     try {
-      const changed = editorApplyAt(grid.x, grid.y, editorPointer.temporaryEraser);
+      const changed = editorApplyAt(grid.x, grid.y);
       if (changed && !editorPointer.historyRecorded && editorPointer.beforeSnapshot) {
         editorHistory.undo.push(editorPointer.beforeSnapshot);
         if (editorHistory.undo.length > EDITOR_HISTORY_LIMIT) editorHistory.undo.shift();
