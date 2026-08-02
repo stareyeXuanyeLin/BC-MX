@@ -249,6 +249,22 @@ test("teleport triggers a fog-flip room sync so the server broadcasts twice", ()
   assert.equal(Object.prototype.hasOwnProperty.call(context.ChatRoomData.MapData, "Fog"), false);
 });
 
+test("room sync sends Player.ID so the server accepts admin updates", () => {
+  const sent = [];
+  const { api } = createRuntime({
+    Player: { MemberNumber: 12345, ID: 0, MapData: { Pos: { X: 20, Y: 20 } } },
+    ServerSend: (type, data) => sent.push({ type, data }),
+    ChatRoomGetSettings: room => ({ Name: room.Name, MapData: { ...room.MapData } }),
+  });
+  api.teleportCharacter(222, 3, 4);
+  const update = sent.find(message => message.type === "ChatRoomAdmin");
+  assert.ok(update);
+  // 必须传 Player.ID（0）而非自己的 MemberNumber（12345）：
+  // 服务器对“管理员对自己执行 Update”直接拒绝，全房间属性广播不会发生。
+  assert.equal(update.data.MemberNumber, 0);
+  assert.notEqual(update.data.MemberNumber, 12345);
+});
+
 test("fog flip restores an explicitly disabled fog to disabled", () => {
   const sent = [];
   const { api, context } = createRuntime({

@@ -743,7 +743,10 @@
     };
     const sendUpdate = () => {
       serverSend("ChatRoomAdmin", {
-        MemberNumber: Number(player.ID) || Number(player.MemberNumber),
+        // 对齐原版：MemberNumber 传 Player.ID（客户端角色索引，登录后为 0）。
+        // 服务器用 MemberNumber 判断“管理员操作自己”，传自己的 MemberNumber 会被直接拒绝，
+        // Update 与全房间属性广播都不会发生；传 0 则永远不会与任何账号匹配，Update 正常通过。
+        MemberNumber: typeof player.ID === "number" ? player.ID : player.MemberNumber,
         Room: getSettings(room),
         Action: "Update",
       });
