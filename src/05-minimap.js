@@ -222,22 +222,13 @@
     drawMinimap();
   }
 
-  // 事件坐标 → canvas 内部像素坐标（比例换算，免疫 CSS 尺寸与属性尺寸不一致）
+  // 包装共享视口函数，保留既有测试与模块内命名。
   function minimapEventToCanvasXY(canvas, rect, clientX, clientY) {
-    const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
-    const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
-    return {
-      x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY,
-    };
+    return canvasEventToInternalXY(canvas, rect, clientX, clientY);
   }
 
   function minimapCanvasToGridXY(mx, my, view, grid) {
-    if (!grid) return null;
-    const gx = Math.floor((mx - view.panX) / view.zoom / minimapTileStep());
-    const gy = Math.floor((my - view.panY) / view.zoom / minimapTileStep());
-    if (gx < 0 || gy < 0 || gx >= grid.width || gy >= grid.height) return null;
-    return { x: gx, y: gy };
+    return viewportCanvasToGridXY(mx, my, view, grid, minimapTileStep());
   }
 
   function minimapCanvasToGrid(mx, my) {
@@ -245,10 +236,7 @@
   }
 
   function minimapGridToCanvas(x, y) {
-    return {
-      x: x * minimapTileStep() * minimapView.zoom + minimapView.panX,
-      y: y * minimapTileStep() * minimapView.zoom + minimapView.panY,
-    };
+    return viewportGridToCanvasXY(x, y, minimapView, minimapTileStep());
   }
 
   function rebuildMinimapBackground() {

@@ -4,7 +4,10 @@
   }
 
   function isRoomAdmin() {
-    return typeof globalThis.ChatRoomPlayerIsAdmin === "function" && ChatRoomPlayerIsAdmin() === true;
+    try {
+      if (typeof ChatRoomPlayerIsAdmin === "function") return ChatRoomPlayerIsAdmin() === true;
+    } catch (_) { /* fall through to legacy window property */ }
+    return typeof globalThis.ChatRoomPlayerIsAdmin === "function" && globalThis.ChatRoomPlayerIsAdmin() === true;
   }
 
   function assertRoomContextAction() {
@@ -112,7 +115,32 @@
     const width = globalThis.ChatRoomMapViewWidth;
     const height = globalThis.ChatRoomMapViewHeight;
     if (Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0) return { width, height };
-    return { width: 40, height: 40 }; // 原版固定尺寸兑底
+    return { width: 40, height: 40 }; // 原版固定尺寸兜底
+  }
+
+  // 小地图与地图编辑器共用的视口数学。所有反算都必须先减平移量，再除缩放与格步长。
+  function canvasEventToInternalXY(canvas, rect, clientX, clientY) {
+    const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  }
+
+  function viewportCanvasToGridXY(mx, my, view, grid, cellStep) {
+    if (!grid || !view || !(cellStep > 0) || !(view.zoom > 0)) return null;
+    const gx = Math.floor((mx - view.panX) / view.zoom / cellStep);
+    const gy = Math.floor((my - view.panY) / view.zoom / cellStep);
+    if (gx < 0 || gy < 0 || gx >= grid.width || gy >= grid.height) return null;
+    return { x: gx, y: gy };
+  }
+
+  function viewportGridToCanvasXY(x, y, view, cellStep) {
+    return {
+      x: x * cellStep * view.zoom + view.panX,
+      y: y * cellStep * view.zoom + view.panY,
+    };
   }
 
   function getPlayerCharacter() {

@@ -23,6 +23,12 @@
         teleport: teleportCharacter,
         grid: buildMapGridSnapshot,
       },
+      editor: {
+        open: openEditor,
+        close: closeEditor,
+        toggle: toggleEditor,
+        isOpen: () => editorOpen,
+      },
     });
     // BCMX 为当前正式 API 名；BCMapSaver 保留为兼容别名，供已发布时依赖旧名的外部脚本使用。
     globalThis.BCMX = api;
@@ -44,9 +50,11 @@
         modApi = bcModSdk.registerMod({ name: MOD_NAME, fullName: FULL_NAME, version: VERSION }, { allowReplace: false });
         installHooks();
         installMinimapHooks();
+        installEditorHooks();
         installStealthHooks();
         injectStyle();
         injectMinimapStyle();
+        injectEditorStyle();
         runtimeInstalled = true;
       } catch (error) {
         duplicateInstance = /already|duplicate|registered|replace/i.test(String(error?.message || error));
@@ -105,6 +113,21 @@
       minimapEventToCanvasXY,
       minimapCanvasToGridXY,
       minimapPlayerColor,
+      canvasEventToInternalXY,
+      viewportCanvasToGridXY,
+      viewportGridToCanvasXY,
+      buildEditorMaterials,
+      filterEditorMaterials,
+      editorMaterialOwned,
+      editorBrushCells,
+      applyEditorStroke,
+      createEditorHistory,
+      editorPushUndo,
+      editorUndoMap,
+      editorRedoMap,
+      editorCanvasToGridXY,
+      editorGridToCanvasXY,
+      shouldDrawEditorEntryButton,
       isStealthEnabled,
       setStealthEnabled,
       isCharacterHidden,
@@ -118,8 +141,8 @@
       isTeleportMessageFor,
       buildSwapTeleportPlan,
       isPositionReachable,
-      installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); installStealthHooks(); },
-      constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS, ENTRY_BUTTON, MINIMAP_ENTRY_BUTTON },
+      installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); installEditorHooks(); installStealthHooks(); },
+      constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS, ENTRY_BUTTON, MINIMAP_ENTRY_BUTTON, EDITOR_ENTRY_BUTTON, EDITOR_HISTORY_LIMIT, EDITOR_OBJECT_BLANK_ID },
     };
   } else {
     const timer = setInterval(() => {

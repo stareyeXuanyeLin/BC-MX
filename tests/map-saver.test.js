@@ -13,6 +13,7 @@ const parts = [
   "03-exchange.js",
   "04-map-bridge.js",
   "05-minimap.js",
+  "05-editor.js",
   "05-ui.js",
   "06-bootstrap.js",
 ];
