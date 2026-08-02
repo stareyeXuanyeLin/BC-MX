@@ -929,7 +929,8 @@
 
   function applyMapViewPresenceMarker(character, mapData) {
     if (!character) return;
-    if (mapData?.PrivateState?.BMSMapViewActive === true) character.BMSMapViewActive = true;
+    // PrivateState 是原版地图的玩家私有状态，不能作为跨成员状态通道；插件标记必须放在 MapData 顶层。
+    if (mapData?.BMSMapViewActive === true) character.BMSMapViewActive = true;
     else delete character.BMSMapViewActive;
   }
 
@@ -944,12 +945,9 @@
     if (hidden) player.MapData.BMSHidden = true;
     else delete player.MapData.BMSHidden;
     const active = isLocalMapViewActive();
-    const privateState = player.MapData.PrivateState && typeof player.MapData.PrivateState === "object"
-      ? player.MapData.PrivateState
-      : (player.MapData.PrivateState = {});
-    const changed = (privateState.BMSMapViewActive === true) !== active || hiddenChanged;
-    if (active) privateState.BMSMapViewActive = true;
-    else delete privateState.BMSMapViewActive;
+    const changed = (player.MapData.BMSMapViewActive === true) !== active || hiddenChanged;
+    if (active) player.MapData.BMSMapViewActive = true;
+    else delete player.MapData.BMSMapViewActive;
     if (active) player.BMSMapViewActive = true;
     else delete player.BMSMapViewActive;
     if (!changed && !force) return true;

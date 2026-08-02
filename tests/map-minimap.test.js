@@ -504,26 +504,58 @@ test("remote players outside the map view cannot be teleported", () => {
   assert.equal(api.isCharacterMapViewActive(bob), false);
   assert.throws(() => api.teleportCharacter(222, 3, 4), /当前不在地图视角/);
 
-  api.applyMapViewPresenceMarker(bob, { PrivateState: { BMSMapViewActive: true } });
+  api.applyMapViewPresenceMarker(bob, { BMSMapViewActive: true });
   assert.equal(api.isCharacterMapViewActive(bob), true);
   assert.equal(api.teleportCharacter(222, 3, 4), "native");
+});
+
+test("map view presence uses the broadcast MapData root instead of private state", () => {
+  const bob = { MemberNumber: 222 };
+  const { api } = createRuntime();
+  api.applyMapViewPresenceMarker(bob, { PrivateState: { BMSMapViewActive: true } });
+  assert.equal(api.isCharacterMapViewActive(bob), false);
+  api.applyMapViewPresenceMarker(bob, { BMSMapViewActive: true, PrivateState: {} });
+  assert.equal(api.isCharacterMapViewActive(bob), true);
 });
 
 test("local map view presence is broadcast only when it changes or is forced", () => {
   const sent = [];
   const { api, context } = createRuntime({ ServerSend: (type, data) => sent.push({ type, data: plain(data) }) });
   assert.equal(api.syncLocalMapViewPresence(), true);
-  assert.equal(context.Player.MapData.PrivateState.BMSMapViewActive, true);
+  assert.equal(context.Player.MapData.BMSMapViewActive, true);
+  assert.equal(context.Player.MapData.PrivateState, undefined);
   assert.equal(sent.length, 1);
   api.syncLocalMapViewPresence();
   assert.equal(sent.length, 1);
 
   context.ChatRoomMapViewIsActive = () => false;
   api.syncLocalMapViewPresence();
-  assert.equal(context.Player.MapData.PrivateState.BMSMapViewActive, undefined);
+  assert.equal(context.Player.MapData.BMSMapViewActive, undefined);
   assert.equal(sent.length, 2);
   api.syncLocalMapViewPresence(true);
   assert.equal(sent.length, 3);
+});
+
+test("switching between character and map views broadcasts the new presence immediately", () => {
+  let mapActive = false;
+  const sent = [];
+  const { api, context } = createRuntime({
+    ChatRoomMapViewIsActive: () => mapActive,
+    ChatRoomActivateView: viewName => { mapActive = viewName === "Map"; },
+    ServerSend: (type, data) => sent.push({ type, data: plain(data) }),
+  });
+  api.installHooksForTest(createModApi(context));
+  assert.equal(sent.length, 0);
+
+  context.ChatRoomActivateView("Map");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, "ChatRoomCharacterMapDataUpdate");
+  assert.equal(sent[0].data.BMSMapViewActive, true);
+  assert.equal(sent[0].data.PrivateState, undefined);
+
+  context.ChatRoomActivateView("Character");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].data.BMSMapViewActive, undefined);
 });
 
 test("non-admin teleport is restricted to self and reachable tiles", () => {
@@ -602,7 +634,7 @@ test("stealth toggle persists and broadcasts marker", () => {
   assert.equal(sent[1].data.BMSHidden, undefined);
 });
 
-test("receive hooks mark hidden characters without touching game MapData", () => {
+test("receive hooks recover plugin markers without touching game MapData", () => {
   const { api, context } = createRuntime();
   // 模拟原版接收处理：须在沙箱创建后再注入，避免预置函数被 contextify 包装
   context.ChatRoomMapViewSyncMapData = data => {
@@ -623,10 +655,10 @@ test("receive hooks mark hidden characters without touching game MapData", () =>
   assert.equal(alice.BMSHidden, undefined);
 
   // 实时位置更新（平铺结构 {MemberNumber, MapData}）
-  context.ChatRoomMapViewSyncMapData({ MemberNumber: 111, MapData: { Pos: { X: 6, Y: 6 }, PrivateState: { BMSMapViewActive: true }, BMSHidden: true } });
+  context.ChatRoomMapViewSyncMapData({ MemberNumber: 111, MapData: { Pos: { X: 6, Y: 6 }, PrivateState: {}, BMSMapViewActive: true, BMSHidden: true } });
   assert.equal(alice.BMSHidden, true);
   assert.equal(alice.BMSMapViewActive, true);
-  assert.deepEqual(plain(alice.MapData), { Pos: { X: 6, Y: 6 }, PrivateState: { BMSMapViewActive: true }, BMSHidden: true }); // 游戏数据保持原样，仅插件侧标记
+  assert.deepEqual(plain(alice.MapData), { Pos: { X: 6, Y: 6 }, PrivateState: {}, BMSMapViewActive: true, BMSHidden: true }); // 游戏数据保持原样，仅插件侧标记
 
   context.ChatRoomMapViewSyncMapData({ MemberNumber: 111, MapData: { Pos: { X: 7, Y: 7 } } });
   assert.equal(alice.BMSHidden, undefined);
@@ -674,7 +706,8 @@ test("active map player rebroadcasts plugin markers after a member joins", async
   await new Promise(resolve => setTimeout(resolve, 500));
   assert.equal(sent.length, 1);
   assert.equal(sent[0].data.BMSHidden, undefined);
-  assert.equal(sent[0].data.PrivateState.BMSMapViewActive, true);
+  assert.equal(sent[0].data.BMSMapViewActive, true);
+  assert.equal(sent[0].data.PrivateState, undefined);
 });
 
 test("relog: stealth storage is restored onto fresh MapData and included in rebroadcast", async () => {
