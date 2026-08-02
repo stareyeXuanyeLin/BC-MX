@@ -37,10 +37,14 @@ const TILE_LOOKUP = {
   1000: { ID: 1000, Type: "Wall", Style: "Brick", CanEnter: () => false },
 };
 const OBJECT_LOOKUP = {
+  110: { ID: 110, Type: "FloorDecoration", Style: "EntryFlag", Exit: true, Unique: true },
+  115: { ID: 115, Type: "FloorDecoration", Style: "ExitFlag", Exit: true },
   2000: { ID: 2000, Type: "FloorObstacle", Style: "Blank", CanEnter: () => false },
   2030: { ID: 2030, Type: "FloorObstacle", Style: "IronBars", CanEnter: () => false },
   2100: { ID: 2100, Type: "Door", Style: "Wood", CanEnter: dir => dir === "R" },
   3000: { ID: 3000, Type: "FloorDecoration", Style: "Carpet" },
+  4000: { ID: 4000, Type: "WallPath", Style: "Blank", CanEnter: () => false },
+  4011: { ID: 4011, Type: "WallPath", Style: "WoodClosed", CanEnter: () => true },
 };
 
 function createRuntime(overrides = {}) {
@@ -134,6 +138,27 @@ test("grid snapshot accounts for blocking and directional objects", () => {
   assert.equal(at(1, 0), 1);
   assert.equal(at(2, 0), 1);
   assert.equal(at(3, 0), 0);
+});
+
+test("grid snapshot marks doors, room entry and room exit", () => {
+  const tiles = String.fromCharCode(100).repeat(1600);
+  let objects = String.fromCharCode(0).repeat(1600);
+  objects = setCell(objects, 0, 0, 4011); // 原版 WallPath 门
+  objects = setCell(objects, 1, 0, 2100); // 旧版或扩展 Door 类型
+  objects = setCell(objects, 2, 0, 110);  // 入口旗
+  objects = setCell(objects, 3, 0, 115);  // 出口旗
+  objects = setCell(objects, 4, 0, 4000); // 空白墙通道不属于门
+  objects = setCell(objects, 5, 0, 3000); // 普通装饰不标记
+
+  const { api } = createRuntime({ ChatRoomData: { Name: "房", MapData: { Type: "Always", Tiles: tiles, Objects: objects } } });
+  const grid = api.buildMapGridSnapshot();
+  const markerAt = x => grid.objectMarker[x];
+  assert.equal(markerAt(0), api.constants.OBJECT_MARKER_DOOR);
+  assert.equal(markerAt(1), api.constants.OBJECT_MARKER_DOOR);
+  assert.equal(markerAt(2), api.constants.OBJECT_MARKER_ENTRY);
+  assert.equal(markerAt(3), api.constants.OBJECT_MARKER_EXIT);
+  assert.equal(markerAt(4), api.constants.OBJECT_MARKER_NONE);
+  assert.equal(markerAt(5), api.constants.OBJECT_MARKER_NONE);
 });
 
 test("grid snapshot is cached until the encoded strings change", () => {
@@ -306,6 +331,15 @@ test("minimap entry button uses canvas coordinates directly below the archive bu
 
   context.ChatRoomMapViewEditMode = "Tile";
   assert.equal(api.shouldDrawMinimapEntryButton(), false);
+});
+
+test("minimap defaults to the right edge while keeping a safe viewport margin", () => {
+  const { api } = createRuntime();
+  assert.equal(
+    api.minimapDefaultPanelLeft(1920),
+    1920 - api.constants.MINIMAP_PANEL_WIDTH - api.constants.MINIMAP_PANEL_EDGE_GAP,
+  );
+  assert.equal(api.minimapDefaultPanelLeft(640), api.constants.MINIMAP_PANEL_EDGE_GAP);
 });
 
 test("minimap layout isolates the roster and canvas into explicit side-by-side grid columns", () => {

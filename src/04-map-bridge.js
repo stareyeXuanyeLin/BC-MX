@@ -196,6 +196,11 @@
   const TILE_KIND_WATER = 5;
   const TILE_KIND_OTHER = 6;
 
+  const OBJECT_MARKER_NONE = 0;
+  const OBJECT_MARKER_DOOR = 1;
+  const OBJECT_MARKER_ENTRY = 2;
+  const OBJECT_MARKER_EXIT = 3;
+
   let mapGridCache = null; // { signature, snapshot }
 
   function isPositionWalkable(tile, obj) {
@@ -219,6 +224,15 @@
     return TILE_KIND_OTHER;
   }
 
+  function objectMarkerOf(obj) {
+    if (!obj || typeof obj !== "object") return OBJECT_MARKER_NONE;
+    if (obj.Style === "EntryFlag") return OBJECT_MARKER_ENTRY;
+    if (obj.Style === "ExitFlag") return OBJECT_MARKER_EXIT;
+    // 原版门统一属于 WallPath；保留 Door 类型兼容旧版或第三方扩展对象。
+    if (obj.Type === "Door" || (obj.Type === "WallPath" && obj.Style !== "Blank")) return OBJECT_MARKER_DOOR;
+    return OBJECT_MARKER_NONE;
+  }
+
   function buildMapGridSnapshot() {
     const mapData = getChatRoomData()?.MapData;
     const tiles = mapData?.Tiles;
@@ -235,13 +249,15 @@
     const objectLookup = getChatRoomMapViewObjectLookup();
     const walkable = new Uint8Array(count);
     const tileKind = new Uint8Array(count);
+    const objectMarker = new Uint8Array(count);
     for (let i = 0; i < count; i++) {
       const tile = tileLookup?.[tiles.charCodeAt(i)];
       const obj = objectLookup?.[objects.charCodeAt(i)];
       walkable[i] = isPositionWalkable(tile, obj) ? 1 : 0;
       tileKind[i] = tileKindOf(tile);
+      objectMarker[i] = objectMarkerOf(obj);
     }
-    const snapshot = { width: size.width, height: size.height, tiles, objects, walkable, tileKind, revision: now() };
+    const snapshot = { width: size.width, height: size.height, tiles, objects, walkable, tileKind, objectMarker, revision: now() };
     mapGridCache = { signature, snapshot };
     return snapshot;
   }

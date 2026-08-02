@@ -105,6 +105,7 @@
       createTeleportMessage,
       isPositionWalkable,
       tileKindOf,
+      objectMarkerOf,
       findRoomCharacter,
       getRoomCharacterList,
       playerPositionSignature,
@@ -112,6 +113,7 @@
       getServerSend,
       minimapEventToCanvasXY,
       minimapCanvasToGridXY,
+      minimapDefaultPanelLeft,
       minimapPlayerColor,
       canvasEventToInternalXY,
       viewportCanvasToGridXY,
@@ -149,7 +151,7 @@
       buildSwapTeleportPlan,
       isPositionReachable,
       installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); installEditorHooks(); installStealthHooks(); },
-      constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS, ENTRY_BUTTON, MINIMAP_ENTRY_BUTTON, EDITOR_ENTRY_BUTTON, EDITOR_HISTORY_LIMIT, EDITOR_OBJECT_BLANK_ID, EDITOR_LIGHTING_BLANK_ID },
+      constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS, ENTRY_BUTTON, MINIMAP_ENTRY_BUTTON, MINIMAP_PANEL_WIDTH, MINIMAP_PANEL_EDGE_GAP, OBJECT_MARKER_NONE, OBJECT_MARKER_DOOR, OBJECT_MARKER_ENTRY, OBJECT_MARKER_EXIT, EDITOR_ENTRY_BUTTON, EDITOR_HISTORY_LIMIT, EDITOR_OBJECT_BLANK_ID, EDITOR_LIGHTING_BLANK_ID },
     };
   } else {
     const timer = setInterval(() => {

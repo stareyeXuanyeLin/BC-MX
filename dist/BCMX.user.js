@@ -637,6 +637,11 @@
   const TILE_KIND_WATER = 5;
   const TILE_KIND_OTHER = 6;
 
+  const OBJECT_MARKER_NONE = 0;
+  const OBJECT_MARKER_DOOR = 1;
+  const OBJECT_MARKER_ENTRY = 2;
+  const OBJECT_MARKER_EXIT = 3;
+
   let mapGridCache = null; // { signature, snapshot }
 
   function isPositionWalkable(tile, obj) {
@@ -660,6 +665,15 @@
     return TILE_KIND_OTHER;
   }
 
+  function objectMarkerOf(obj) {
+    if (!obj || typeof obj !== "object") return OBJECT_MARKER_NONE;
+    if (obj.Style === "EntryFlag") return OBJECT_MARKER_ENTRY;
+    if (obj.Style === "ExitFlag") return OBJECT_MARKER_EXIT;
+    // 原版门统一属于 WallPath；保留 Door 类型兼容旧版或第三方扩展对象。
+    if (obj.Type === "Door" || (obj.Type === "WallPath" && obj.Style !== "Blank")) return OBJECT_MARKER_DOOR;
+    return OBJECT_MARKER_NONE;
+  }
+
   function buildMapGridSnapshot() {
     const mapData = getChatRoomData()?.MapData;
     const tiles = mapData?.Tiles;
@@ -676,13 +690,15 @@
     const objectLookup = getChatRoomMapViewObjectLookup();
     const walkable = new Uint8Array(count);
     const tileKind = new Uint8Array(count);
+    const objectMarker = new Uint8Array(count);
     for (let i = 0; i < count; i++) {
       const tile = tileLookup?.[tiles.charCodeAt(i)];
       const obj = objectLookup?.[objects.charCodeAt(i)];
       walkable[i] = isPositionWalkable(tile, obj) ? 1 : 0;
       tileKind[i] = tileKindOf(tile);
+      objectMarker[i] = objectMarkerOf(obj);
     }
-    const snapshot = { width: size.width, height: size.height, tiles, objects, walkable, tileKind, revision: now() };
+    const snapshot = { width: size.width, height: size.height, tiles, objects, walkable, tileKind, objectMarker, revision: now() };
     mapGridCache = { signature, snapshot };
     return snapshot;
   }
@@ -1035,6 +1051,7 @@
   });
   const MINIMAP_CANVAS_SIZE = 520;
   const MINIMAP_PANEL_WIDTH = 778;
+  const MINIMAP_PANEL_EDGE_GAP = 16;
   const MINIMAP_SIDE_WIDTH = 222;
   const MINIMAP_TILE = 12;
   const MINIMAP_GAP = 1;
@@ -1054,6 +1071,11 @@
     [TILE_KIND_HALF_WALL]: "#96826e",
     [TILE_KIND_WATER]: "#7cb3d4",
     [TILE_KIND_OTHER]: "#8a8f98",
+  };
+  const MINIMAP_OBJECT_MARKER_STYLES = {
+    [OBJECT_MARKER_DOOR]: { fill: "#ff9f43", text: "#211407", label: "门" },
+    [OBJECT_MARKER_ENTRY]: { fill: "#2de2e6", text: "#071b21", label: "入" },
+    [OBJECT_MARKER_EXIT]: { fill: "#ff4f87", text: "#250711", label: "出" },
   };
 
   let minimapOpen = false;
@@ -1075,7 +1097,7 @@
     const style = document.createElement("style");
     style.id = "bms-minimap-style";
     style.textContent = `
-      #${MINIMAP_ID}{position:fixed;left:50%;top:36px;z-index:99990;width:${MINIMAP_PANEL_WIDTH}px;background:#111d31;border:1px solid #45678f;border-radius:12px;box-shadow:0 18px 52px rgba(0,0,0,.6);font-family:Inter,"Microsoft YaHei",sans-serif;color:#eaf2ff;user-select:none;overflow:hidden}
+      #${MINIMAP_ID}{position:fixed;left:calc(100vw - ${MINIMAP_PANEL_WIDTH + MINIMAP_PANEL_EDGE_GAP}px);top:36px;z-index:99990;width:${MINIMAP_PANEL_WIDTH}px;background:#111d31;border:1px solid #45678f;border-radius:12px;box-shadow:0 18px 52px rgba(0,0,0,.6);font-family:Inter,"Microsoft YaHei",sans-serif;color:#eaf2ff;user-select:none;overflow:hidden}
       #${MINIMAP_ID} *{box-sizing:border-box}
       #${MINIMAP_ID} header{display:flex;align-items:center;gap:8px;padding:9px 12px;background:linear-gradient(135deg,#1b3151,#17243b);border-bottom:1px solid #385576;cursor:move;touch-action:none}
       #${MINIMAP_ID} .bms-mm-title{font-size:15px;font-weight:750;letter-spacing:.03em}
@@ -1088,6 +1110,12 @@
       #${MINIMAP_ID} canvas.bms-mm-dragging{cursor:grabbing}
       #${MINIMAP_ID} .bms-mm-side{position:relative!important;inset:auto!important;float:none!important;transform:none!important;margin:0!important;width:${MINIMAP_SIDE_WIDTH}px!important;min-width:0;grid-column:1;grid-row:1;display:flex!important;flex-direction:column;border:1px solid #2c425d;border-radius:6px;background:#0f1a2c;overflow:hidden}
       #${MINIMAP_ID} .bms-mm-side-title{padding:8px 10px;font-size:12px;font-weight:700;color:#9eb4ce;border-bottom:1px solid #2c425d;background:#152238}
+      #${MINIMAP_ID} .bms-mm-legend{display:flex;align-items:center;gap:9px;padding:6px 10px;border-bottom:1px solid #2c425d;background:#111f34;font-size:11px;color:#bdd0e5;flex:none}
+      #${MINIMAP_ID} .bms-mm-legend span{display:flex;align-items:center;gap:4px;white-space:nowrap}
+      #${MINIMAP_ID} .bms-mm-key{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border:1px solid rgba(255,255,255,.8);border-radius:3px;font-size:9px;font-weight:800;line-height:1;color:#101722}
+      #${MINIMAP_ID} .bms-mm-key-door{background:${MINIMAP_OBJECT_MARKER_STYLES[OBJECT_MARKER_DOOR].fill}}
+      #${MINIMAP_ID} .bms-mm-key-entry{background:${MINIMAP_OBJECT_MARKER_STYLES[OBJECT_MARKER_ENTRY].fill}}
+      #${MINIMAP_ID} .bms-mm-key-exit{background:${MINIMAP_OBJECT_MARKER_STYLES[OBJECT_MARKER_EXIT].fill}}
       #${MINIMAP_ID} .bms-mm-roster{list-style:none;margin:0;padding:6px;flex:1;overflow-y:auto;min-height:0}
       #${MINIMAP_ID} .bms-mm-roster.bms-mm-locked{pointer-events:none;opacity:.68}
       #${MINIMAP_ID} .bms-mm-roster li{display:flex;gap:8px;align-items:center;padding:7px 9px;border-radius:7px;cursor:pointer;font-size:13px;border:1px solid transparent}
@@ -1134,6 +1162,10 @@
 
   function minimapTileStep() { return MINIMAP_TILE + MINIMAP_GAP; }
 
+  function minimapDefaultPanelLeft(viewportWidth) {
+    return Math.max(MINIMAP_PANEL_EDGE_GAP, Math.floor(Number(viewportWidth) - MINIMAP_PANEL_WIDTH - MINIMAP_PANEL_EDGE_GAP));
+  }
+
   function minimapGridPixelSize(grid) {
     return grid.width * MINIMAP_TILE + (grid.width - 1) * MINIMAP_GAP;
   }
@@ -1155,6 +1187,11 @@
       <div class="bms-mm-body">
         <aside class="bms-mm-side">
           <div class="bms-mm-side-title">房间成员</div>
+          <div class="bms-mm-legend" aria-label="地图标记图例">
+            <span><i class="bms-mm-key bms-mm-key-door">门</i>门</span>
+            <span><i class="bms-mm-key bms-mm-key-entry">入</i>入口</span>
+            <span><i class="bms-mm-key bms-mm-key-exit">出</i>出口</span>
+          </div>
           <ul class="bms-mm-roster"></ul>
           <label class="bms-mm-stealth" title="隐藏坐标：开启后其它插件用户的小地图不再显示你的坐标与标记，游戏内位置不受影响">
             <input type="checkbox" data-mm-stealth>
@@ -1165,7 +1202,7 @@
         <canvas width="${MINIMAP_CANVAS_SIZE}" height="${MINIMAP_CANVAS_SIZE}"></canvas>
       </div>
       <footer class="bms-mm-status"></footer>`;
-    root.style.left = `${Math.max(8, Math.floor((window.innerWidth - MINIMAP_PANEL_WIDTH) / 2))}px`;
+    root.style.left = `${minimapDefaultPanelLeft(window.innerWidth)}px`;
     root.style.top = "36px";
     document.body.appendChild(root);
 
@@ -1278,6 +1315,21 @@
         if (minimapGrid.walkable[index] !== 1) {
           ctx.fillStyle = "rgba(0,0,0,0.45)";
           ctx.fillRect(x * step, y * step, MINIMAP_TILE, MINIMAP_TILE);
+        }
+        const markerStyle = MINIMAP_OBJECT_MARKER_STYLES[minimapGrid.objectMarker?.[index]];
+        if (markerStyle) {
+          const px = x * step;
+          const py = y * step;
+          ctx.fillStyle = markerStyle.fill;
+          ctx.fillRect(px, py, MINIMAP_TILE, MINIMAP_TILE);
+          ctx.strokeStyle = "rgba(255,255,255,0.92)";
+          ctx.lineWidth = 1;
+          ctx.strokeRect(px + 0.5, py + 0.5, MINIMAP_TILE - 1, MINIMAP_TILE - 1);
+          ctx.fillStyle = markerStyle.text;
+          ctx.font = "800 9px 'Microsoft YaHei', sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(markerStyle.label, px + MINIMAP_TILE / 2, py + MINIMAP_TILE / 2 + 0.5);
         }
       }
     }
@@ -3520,6 +3572,7 @@
       createTeleportMessage,
       isPositionWalkable,
       tileKindOf,
+      objectMarkerOf,
       findRoomCharacter,
       getRoomCharacterList,
       playerPositionSignature,
@@ -3527,6 +3580,7 @@
       getServerSend,
       minimapEventToCanvasXY,
       minimapCanvasToGridXY,
+      minimapDefaultPanelLeft,
       minimapPlayerColor,
       canvasEventToInternalXY,
       viewportCanvasToGridXY,
@@ -3564,7 +3618,7 @@
       buildSwapTeleportPlan,
       isPositionReachable,
       installHooksForTest: api => { modApi = api; installHooks(); installMinimapHooks(); installEditorHooks(); installStealthHooks(); },
-      constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS, ENTRY_BUTTON, MINIMAP_ENTRY_BUTTON, EDITOR_ENTRY_BUTTON, EDITOR_HISTORY_LIMIT, EDITOR_OBJECT_BLANK_ID, EDITOR_LIGHTING_BLANK_ID },
+      constants: { STORAGE_SCHEMA_VERSION, MAP_FILE_FORMAT, LIBRARY_FILE_FORMAT, FILE_FORMAT_VERSION, MAX_AUTO_BACKUPS, ENTRY_BUTTON, MINIMAP_ENTRY_BUTTON, MINIMAP_PANEL_WIDTH, MINIMAP_PANEL_EDGE_GAP, OBJECT_MARKER_NONE, OBJECT_MARKER_DOOR, OBJECT_MARKER_ENTRY, OBJECT_MARKER_EXIT, EDITOR_ENTRY_BUTTON, EDITOR_HISTORY_LIMIT, EDITOR_OBJECT_BLANK_ID, EDITOR_LIGHTING_BLANK_ID },
     };
   } else {
     const timer = setInterval(() => {
