@@ -188,3 +188,45 @@ test("editor entry requires admin map view and no native edit submode", () => {
   assert.equal(createRuntime({ ChatRoomMapViewEditMode: "Tile" }).api.shouldDrawEditorEntryButton(), false);
   assert.equal(createRuntime({ ChatRoomData: { MapData: { Type: "Never" } } }).api.shouldDrawEditorEntryButton(), false);
 });
+
+test("editor working copy overwrites external map state one-way", () => {
+  const { api, context } = createRuntime();
+  const mapData = context.ChatRoomData.MapData;
+  mapData.Tiles = String.fromCharCode(100).repeat(1600);
+  mapData.Objects = String.fromCharCode(100).repeat(1600);
+  // 编辑器打开时快照的工作副本
+  const working = api.editorSnapshotWorking();
+  // 外部同步（服务器广播/原版清理）把地图改走，编辑器内容必须单向覆盖回去
+  mapData.Tiles = String.fromCharCode(200).repeat(1600);
+  assert.equal(api.editorPushWorkingToMap(working), true);
+  assert.equal(mapData.Tiles.charCodeAt(0), 100);
+  // 再次调用时一致，返回 false，不会无限写回
+  assert.equal(api.editorPushWorkingToMap(working), false);
+  // 外部只改一个格子（局部竞态）也会被写回
+  mapData.Tiles = mapData.Tiles.substring(0, 5) + String.fromCharCode(300) + mapData.Tiles.substring(6);
+  assert.equal(api.editorPushWorkingToMap(working), true);
+  assert.equal(mapData.Tiles.charCodeAt(5), 100);
+});
+
+test("object compatibility pre-check mirrors the native cleanup rules", () => {
+  const { api } = createRuntime();
+  const tileLookup = {
+    100: { ID: 100, Type: "Floor", Style: "Stone" },
+    1000: { ID: 1000, Type: "Wall", Style: "Brick" },
+  };
+  const build = code => String.fromCharCode(code).repeat(1600);
+  const floor = build(100);
+  const wall = build(1000);
+  const def = { Type: "FloorDecoration", Style: "Table" };
+  // 地面装饰：地板上可放，墙上被原版清理
+  assert.equal(api.editorObjectCellCompatible(floor, 5, 5, 40, 40, def, tileLookup), true);
+  assert.equal(api.editorObjectCellCompatible(wall, 5, 5, 40, 40, def, tileLookup), false);
+  // 墙饰：地板上被清理；墙面上下方非墙可放，下方也是墙被清理
+  const wallDeco = { Type: "WallDecoration", Style: "Painting" };
+  assert.equal(api.editorObjectCellCompatible(floor, 5, 5, 40, 40, wallDeco, tileLookup), false);
+  let wallAboveFloor = build(1000); // 全墙，(5,5) 保持墙
+  wallAboveFloor = wallAboveFloor.substring(0, 6 * 40 + 5) + String.fromCharCode(100) + wallAboveFloor.substring(6 * 40 + 6); // 仅下方 (5,6) 改为地板
+  assert.equal(api.editorObjectCellCompatible(wallAboveFloor, 5, 5, 40, 40, wallDeco, tileLookup), true);
+  const wallAboveWall = build(1000);
+  assert.equal(api.editorObjectCellCompatible(wallAboveWall, 5, 5, 40, 40, wallDeco, tileLookup), false);
+});

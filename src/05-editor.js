@@ -81,9 +81,9 @@
   let editorPanelDrag = null;
   let editorSpaceDown = false;
   let editorHistory = createEditorHistory();
+  let editorWorking = null; // 编辑器权威工作副本：打开时快照，渲染与撤销都以它为准，单向覆盖地图
   let editorMaterials = { tile: [], object: [] };
   let editorRecent = [];
-  let editorMapSignature = "";
   let editorLastTick = 0;
   let editorOffscreen = null;
   let editorRenderQueued = false;
@@ -307,8 +307,38 @@
     return getChatRoomData()?.MapData ?? null;
   }
 
-  function editorMapSignatureOf(mapData = editorMapData()) {
-    return `${mapData?.Tiles ?? ""}|${mapData?.Objects ?? ""}`;
+  // 编辑器权威副本：绘制、撤销与渲染都只读写 editorWorking；对外部同步只做单向覆盖。
+  function editorSnapshotWorking() {
+    const mapData = editorMapData();
+    if (!mapData) return null;
+    return { Tiles: String(mapData.Tiles ?? ""), Objects: String(mapData.Objects ?? "") };
+  }
+
+  // 单向覆盖：把编辑器工作副本写回 ChatRoomData.MapData（游戏画面与原版发送链路读到的都是它）。
+  // 可选传入 working 参数便于测试；运行时使用模块工作副本。
+  function editorPushWorkingToMap(working = editorWorking) {
+    const mapData = editorMapData();
+    if (!mapData || !working) return false;
+    if (mapData.Tiles === working.Tiles && mapData.Objects === working.Objects) return false;
+    mapData.Tiles = working.Tiles;
+    mapData.Objects = working.Objects;
+    return true;
+  }
+
+  // 按原版 ChatRoomMapViewUpdateFlag 的清理规则预检物件落点，避免画出必被原版清除的内容。
+  function editorObjectCellCompatible(tiles, x, y, width, height, definition, tileLookup) {
+    if (!definition || definition.Style === "Blank") return false;
+    const index = y * width + x;
+    const tile = tileLookup?.[tiles.charCodeAt(index)];
+    if (!tile) return false;
+    const floorTypes = ["FloorDecoration", "FloorDecorationThemed", "FloorDecorationParty", "FloorDecorationCamping", "FloorDecorationExpanding", "FloorItem", "FloorObstacle"];
+    if (floorTypes.includes(definition.Type) && tile.Type !== "Floor" && tile.Type !== "FloorExterior") return false;
+    if (["WallDecoration", "Banners", "WallPath"].includes(definition.Type) && tile.Type !== "Wall") return false;
+    if (tile.Type === "Wall" && y + 1 < height) {
+      const below = tileLookup?.[tiles.charCodeAt((y + 1) * width + x)];
+      if (below?.Type === "Wall") return false;
+    }
+    return true;
   }
 
   function notifyEditorMapChanged() {
@@ -320,7 +350,6 @@
     refresh.masks();
     mapGridCache = null;
     minimapDirty = true;
-    editorMapSignature = editorMapSignatureOf();
     queueEditorMapRender();
     if (!editorSyncNoticeShown) {
       editorSyncNoticeShown = true;
@@ -331,16 +360,26 @@
   function editorApplyAt(gx, gy) {
     assertRoomMapAction(); // 每次落笔重新验权，避免打开后权限变化绕过入口检查
     const mapData = editorMapData();
+    if (!mapData || !editorWorking) return false;
     const size = getChatRoomMapViewSize();
     const erasing = editorTool === EDITOR_TOOL_ERASER;
     const material = editorSelected?.layer === editorLayer ? editorSelected : null;
     if (!erasing && !material) return false;
-    const cells = editorBrushCells(gx, gy, editorBrushSize, size.width, size.height);
+    let cells = editorBrushCells(gx, gy, editorBrushSize, size.width, size.height);
     const id = erasing
       ? (editorLayer === EDITOR_LAYER_OBJECT ? EDITOR_OBJECT_BLANK_ID : 0)
       : material.id;
-    const changed = applyEditorStroke(mapData, editorLayer, id, cells, erasing ? null : material.definition);
-    if (changed) notifyEditorMapChanged();
+    if (!erasing && editorLayer === EDITOR_LAYER_OBJECT && material.definition) {
+      const tileLookup = getChatRoomMapViewTileLookup();
+      cells = cells.filter(cell => editorObjectCellCompatible(editorWorking.Tiles, cell.x, cell.y, size.width, size.height, material.definition, tileLookup));
+    }
+    const changed = applyEditorStroke(editorWorking, editorLayer, id, cells, erasing ? null : material.definition);
+    if (!changed) {
+      if (!erasing && editorLayer === EDITOR_LAYER_OBJECT && cells.length === 0) toast("该物件不能放置在当前地块上", "error");
+      return false;
+    }
+    editorPushWorkingToMap();
+    notifyEditorMapChanged();
     return changed;
   }
 
@@ -647,9 +686,10 @@
   }
 
   function renderEditorOffscreen() {
-    const mapData = editorMapData();
     const size = getChatRoomMapViewSize();
-    if (typeof document === "undefined" || !mapData) return;
+    if (typeof document === "undefined" || !editorWorking) return;
+    const tiles = editorWorking.Tiles;
+    const objects = editorWorking.Objects;
     if (!editorOffscreen) editorOffscreen = document.createElement("canvas");
     editorOffscreen.width = size.width * EDITOR_TILE_SIZE;
     editorOffscreen.height = size.height * EDITOR_TILE_SIZE;
@@ -663,7 +703,7 @@
     for (let i = 0; i < size.width * size.height; i++) {
       const x = (i % size.width) * EDITOR_TILE_SIZE;
       const y = Math.floor(i / size.width) * EDITOR_TILE_SIZE;
-      const tile = tileLookup?.[mapData.Tiles?.charCodeAt(i)];
+      const tile = tileLookup?.[tiles.charCodeAt(i)];
       if (!tile) {
         drawEditorPlaceholder(ctx, x, y, EDITOR_TILE_SIZE, EDITOR_TILE_SIZE);
         continue;
@@ -675,7 +715,7 @@
     }
 
     for (let i = 0; i < size.width * size.height; i++) {
-      const object = objectLookup?.[mapData.Objects?.charCodeAt(i)];
+      const object = objectLookup?.[objects.charCodeAt(i)];
       if (!object || object.ID <= EDITOR_OBJECT_BLANK_ID || object.Style === "Blank") continue;
       const gx = i % size.width;
       const gy = Math.floor(i / size.width);
@@ -701,7 +741,6 @@
       for (let y = 0; y <= size.height; y++) { ctx.moveTo(0, y * EDITOR_TILE_SIZE + .5); ctx.lineTo(editorOffscreen.width, y * EDITOR_TILE_SIZE + .5); }
       ctx.stroke();
     }
-    editorMapSignature = editorMapSignatureOf(mapData);
     drawEditorViewport();
   }
 
@@ -768,7 +807,8 @@
   }
 
   function editorPointerPosition(event) {
-    const canvas = event.currentTarget;
+    const canvas = document.querySelector?.(`#${EDITOR_ID} .bms-ed-canvas`);
+    if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     return canvasEventToInternalXY(canvas, rect, event.clientX, event.clientY);
   }
@@ -780,7 +820,9 @@
   }
 
   function editorHandlePointerDown(event) {
-    const canvas = event.currentTarget;
+    // 可能在 window 捕获阶段被委托调用（手势拦截），因此不依赖 event.currentTarget。
+    const canvas = document.querySelector?.(`#${EDITOR_ID} .bms-ed-canvas`);
+    if (!canvas) return;
     // 右键或中键始终平移；空格+左键保留为键盘快捷方式。阻止默认行为以压制浏览器菜单与页面手势。
     const panning = event.button === 2 || event.button === 1 || (event.button === 0 && editorSpaceDown);
     const drawing = event.button === 0 && !panning;
@@ -791,14 +833,13 @@
     editorPointer = {
       pointerId: event.pointerId, panning, drawing,
       startX: event.clientX, startY: event.clientY, panX: editorView.panX, panY: editorView.panY, lastIndex: -1,
-      beforeSnapshot: panning ? null : editorSnapshot(editorMapData()), historyRecorded: false,
+      beforeSnapshot: panning ? null : editorSnapshot(editorWorking), historyRecorded: false,
     };
     if (panning) canvas.classList.add("bms-ed-panning");
     else {
       editorDrawFromPointer(event);
       renderEditorControls();
     }
-    event.preventDefault();
   }
 
   function editorHandlePointerMove(event) {
@@ -846,9 +887,9 @@
   function editorPerformHistory(direction) {
     try { assertRoomMapAction(); }
     catch (error) { toast(error.message, "error"); return; }
-    const mapData = editorMapData();
-    const changed = direction === "redo" ? editorRedoMap(editorHistory, mapData) : editorUndoMap(editorHistory, mapData);
+    const changed = direction === "redo" ? editorRedoMap(editorHistory, editorWorking) : editorUndoMap(editorHistory, editorWorking);
     if (!changed) return;
+    editorPushWorkingToMap();
     try { notifyEditorMapChanged(); }
     catch (error) { toast(error.message, "error"); }
     renderEditorControls();
@@ -866,8 +907,12 @@
       toast("检测到原版地图编辑模式，增强编辑器已关闭", "error");
       return;
     }
-    const signature = editorMapSignatureOf();
-    if (signature !== editorMapSignature) queueEditorMapRender();
+    // 单向同步：外部地图状态（服务器广播、原版清理等）不得回灌编辑器，
+    // 检测到被覆盖时立即把工作副本写回地图，保证已绘制内容不消失。
+    if (editorPushWorkingToMap()) {
+      try { notifyEditorMapChanged(); }
+      catch (error) { warn("编辑器内容写回失败", error); }
+    }
     drawEditorViewport();
   }
 
@@ -895,7 +940,7 @@
     editorHover = null;
     editorPointer = null;
     editorHistory = createEditorHistory();
-    editorMapSignature = "";
+    editorWorking = editorSnapshotWorking();
     editorOffscreen = null;
     editorSyncNoticeShown = false;
     editorImageFailures = 0;
@@ -913,6 +958,7 @@
   function closeEditor() {
     if (!editorOpen) return;
     editorOpen = false;
+    editorWorking = null;
     editorPointer = null;
     editorPanelDrag = null;
     editorHover = null;
@@ -965,24 +1011,37 @@
       }
       return next(args);
     });
-    if (typeof globalThis.ChatRoomSyncRoomProperties === "function") {
-      modApi.hookFunction("ChatRoomSyncRoomProperties", 1000, (args, next) => {
-        const result = next(args);
-        if (editorOpen) {
-          editorMapSignature = "";
-          editorHistory = createEditorHistory();
-          syncEditorMaterials();
-          renderEditorPalette();
-          renderEditorControls();
-          queueEditorMapRender();
-        }
-        return result;
-      });
-    }
-    if (typeof globalThis.ChatRoomLeave === "function") {
-      modApi.hookFunction("ChatRoomLeave", 1000, (args, next) => {
-        closeEditor();
-        return next(args);
-      });
-    }
+  // 单向同步策略下不再监听 ChatRoomSyncRoomProperties 回灌编辑器：
+  // 房间内地图同步由 tick 检测并按工作副本单向覆盖处理。
+  if (typeof globalThis.ChatRoomLeave === "function") {
+    modApi.hookFunction("ChatRoomLeave", 1000, (args, next) => {
+      closeEditor();
+      return next(args);
+    });
   }
+
+  // 手势屏蔽：浏览器手势扩展通常在 document/window 捕获阶段先行监听，
+  // 画布冒泡阶段的 preventDefault 无法取消它们已执行的逻辑。
+  // 因此在捕获阶段直接处理画布指针事件，并阻止事件继续传播。
+  globalThis.addEventListener?.("pointerdown", event => {
+    if (!editorOpen) return;
+    const root = document.getElementById(EDITOR_ID);
+    const canvas = root?.querySelector(".bms-ed-canvas");
+    if (!canvas || !canvas.contains(event.target)) return;
+    const panning = event.button === 2 || event.button === 1 || (event.button === 0 && editorSpaceDown);
+    const drawing = event.button === 0 && !panning;
+    if (!panning && !drawing) return;
+    editorHandlePointerDown(event);
+    if (event.defaultPrevented) event.stopImmediatePropagation();
+  }, true);
+  const blockEditorContextMenu = event => {
+    if (!editorOpen) return;
+    const root = document.getElementById(EDITOR_ID);
+    if (root?.contains(event.target)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  };
+  globalThis.addEventListener?.("contextmenu", blockEditorContextMenu, true);
+  globalThis.addEventListener?.("auxclick", blockEditorContextMenu, true);
+}

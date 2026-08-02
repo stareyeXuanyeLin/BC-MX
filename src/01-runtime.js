@@ -1,6 +1,6 @@
   const MOD_NAME = "BCMX";
   const FULL_NAME = "BC Map eXtended";
-  const VERSION = "0.3.1";
+  const VERSION = "0.3.2";
   const STORAGE_SCHEMA_VERSION = 1;
   const RECORD_STORAGE_VERSION = 1;
   // 文件格式标识沿用历史值（BC_MAP_SAVER_*），保证旧版本导出的文件可继续导入，反之亦然。

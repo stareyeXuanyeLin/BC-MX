@@ -86,6 +86,8 @@
 
     ChatRoomMapViewUpdateFlag();
     ChatRoomMapViewCalculatePerceptionMasks();
+    // 整图替换后编辑器工作副本已过期：关闭编辑器，避免单向覆盖把旧内容写回新地图。
+    if (typeof closeEditor === "function") closeEditor();
     if (typeof globalThis.ChatRoomSendLocal === "function") ChatRoomSendLocal(`地图存档“${record.name}”已载入，BC 将同步房间地图。`);
     return { record, backup };
   }
