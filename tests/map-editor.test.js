@@ -171,11 +171,17 @@ test("asset-bound objects are greyed logically when inventory ownership is missi
   ]);
 });
 
-test("editor UI wraps categories, fills the viewport and uses right-button panning", () => {
+test("editor UI uses collapsible category groups, fills the viewport and uses right-button panning", () => {
   const editorSource = fs.readFileSync(path.join(root, "src", "05-editor.js"), "utf8");
   assert.match(editorSource, /width:calc\(100vw - 16px\);height:calc\(100vh - 16px\)/);
-  assert.match(editorSource, /\.bms-ed-categories\{[^}]*flex-wrap:wrap/);
-  assert.doesNotMatch(editorSource, /\.bms-ed-categories\{[^}]*overflow-x:auto/);
+  // 素材库改为折叠栏：整栏滚动，不再使用分类按钮行与分页
+  assert.match(editorSource, /\.bms-ed-groups\{[^}]*overflow-y:auto/);
+  assert.doesNotMatch(editorSource, /\.bms-ed-categories/);
+  assert.doesNotMatch(editorSource, /data-category/);
+  // 最近分类固定存在且置顶，地块层默认展开、物件层默认折叠
+  assert.match(editorSource, /\{ key: "recent", label: "最近", items:/);
+  assert.match(editorSource, /state\.has\(key\) \? state\.get\(key\) : layer === EDITOR_LAYER_OBJECT/);
+  assert.match(editorSource, /data-group-head=/);
   assert.doesNotMatch(editorSource, /data-tool="pan"/);
   assert.match(editorSource, /event\.button === 2 \|\| event\.button === 1/);
   assert.doesNotMatch(editorSource, /temporaryEraser/);

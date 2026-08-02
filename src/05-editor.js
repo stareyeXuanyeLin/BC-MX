@@ -74,7 +74,8 @@
   let editorBrushSize = 1;
   let editorGridVisible = true;
   let editorSelected = null;
-  let editorCategory = { tile: "", object: "" };
+  // 每层素材折叠栏的折叠状态；未记录的分类使用层默认值（地块展开、物件折叠）
+  let editorGroupState = { tile: new Map(), object: new Map() };
   let editorQuery = "";
   let editorHover = null;
   let editorPointer = null;
@@ -388,10 +389,6 @@
     const objectList = getChatRoomMapViewObjectList();
     editorMaterials.tile = buildEditorMaterials(EDITOR_LAYER_TILE, tileList ?? getChatRoomMapViewTileLookup());
     editorMaterials.object = buildEditorMaterials(EDITOR_LAYER_OBJECT, objectList ?? getChatRoomMapViewObjectLookup());
-    for (const layer of [EDITOR_LAYER_TILE, EDITOR_LAYER_OBJECT]) {
-      const types = [...new Set(editorMaterials[layer].map(item => item.type))];
-      if (!types.includes(editorCategory[layer])) editorCategory[layer] = types[0] ?? "";
-    }
     if (editorSelected) {
       editorSelected = editorMaterials[editorSelected.layer].find(item => item.id === editorSelected.id) ?? null;
     }
@@ -428,12 +425,19 @@
       #${EDITOR_ID} .bms-ed-palette{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid #2c425d;border-radius:7px;background:#0f1a2c;overflow:hidden}
       #${EDITOR_ID} .bms-ed-layer-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:8px;border-bottom:1px solid #2c425d}
       #${EDITOR_ID} .bms-ed-layer-tabs button{height:34px;font-weight:700}
-      #${EDITOR_ID} .bms-ed-categories{display:flex;flex-wrap:wrap;align-content:flex-start;gap:6px;padding:8px;border-bottom:1px solid #2c425d;flex:none}
-      #${EDITOR_ID} .bms-ed-categories button{height:28px;padding:0 10px;white-space:nowrap;font-size:12px;flex:0 0 auto}
+      #${EDITOR_ID} .bms-ed-groups{display:flex;flex-direction:column;gap:6px;padding:8px;overflow-y:auto;min-height:0;flex:1}
+      #${EDITOR_ID} .bms-ed-group{border:1px solid #2c425d;border-radius:7px;background:#0d1829;overflow:hidden;flex:none}
+      #${EDITOR_ID} .bms-ed-group-head{display:flex;align-items:center;gap:6px;width:100%;height:32px;padding:0 10px;border:none;border-radius:0;background:#16273e;font-size:12px;text-align:left;color:#dbe7f7}
+      #${EDITOR_ID} .bms-ed-group-head:hover:not(:disabled){background:#1e3553;border-color:transparent}
+      #${EDITOR_ID} .bms-ed-group-count{margin-left:auto;font-size:10px;color:#8fa8c6;background:#203858;border-radius:9px;padding:1px 7px;flex:none}
+      #${EDITOR_ID} .bms-ed-group-chevron{margin-left:6px;font-size:10px;color:#7d95b5;display:inline-block;transition:transform .15s ease;flex:none}
+      #${EDITOR_ID} .bms-ed-group.bms-ed-collapsed .bms-ed-group-chevron{transform:rotate(-90deg)}
+      #${EDITOR_ID} .bms-ed-group-body{display:block}
+      #${EDITOR_ID} .bms-ed-group.bms-ed-collapsed .bms-ed-group-body{display:none}
       #${EDITOR_ID} .bms-ed-search-wrap{padding:8px;border-bottom:1px solid #2c425d}
       #${EDITOR_ID} .bms-ed-search{width:100%;height:32px;border:1px solid #385576;border-radius:7px;background:#0a1423;color:#eaf2ff;padding:0 10px;outline:none;user-select:text}
       #${EDITOR_ID} .bms-ed-search:focus{border-color:#78a5d8}
-      #${EDITOR_ID} .bms-ed-assets{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));align-content:start;gap:8px;padding:8px;overflow-y:auto;min-height:0;flex:1}
+      #${EDITOR_ID} .bms-ed-assets{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));align-content:start;gap:8px;padding:8px}
       #${EDITOR_ID} .bms-ed-asset{position:relative;height:68px;padding:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0}
       #${EDITOR_ID} .bms-ed-asset img{width:45px;height:45px;object-fit:contain;image-rendering:auto;pointer-events:none}
       #${EDITOR_ID} .bms-ed-asset span{width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:#b9cde6;text-align:center}
@@ -441,6 +445,7 @@
       #${EDITOR_ID} .bms-ed-asset.bms-ed-selected::after{content:"✓";position:absolute;right:3px;top:1px;color:#62d3ff;font-size:11px}
       #${EDITOR_ID} .bms-ed-asset.bms-ed-locked{filter:grayscale(1);opacity:.45}
       #${EDITOR_ID} .bms-ed-empty{grid-column:1/-1;color:#8095ae;text-align:center;padding:24px 8px;font-size:12px}
+      #${EDITOR_ID} .bms-ed-group .bms-ed-empty{padding:10px 8px}
       #${EDITOR_ID} .bms-ed-selection{padding:8px 10px;min-height:38px;border-top:1px solid #2c425d;color:#9eb4ce;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none}
       #${EDITOR_ID} .bms-ed-selection strong{color:#8fd0ff}
       #${EDITOR_ID} .bms-ed-status{height:34px;padding:7px 12px;border-top:1px solid #385576;background:#0d1829;color:#9eb4ce;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none}
@@ -472,9 +477,8 @@
         </main>
         <aside class="bms-ed-palette">
           <nav class="bms-ed-layer-tabs"><button data-layer="tile">地块</button><button data-layer="object">物件</button></nav>
-          <div class="bms-ed-categories"></div>
           <div class="bms-ed-search-wrap"><input class="bms-ed-search" type="search" maxlength="60" placeholder="搜索类型、样式或 ID"></div>
-          <div class="bms-ed-assets"></div><div class="bms-ed-selection"></div>
+          <div class="bms-ed-groups"></div><div class="bms-ed-selection"></div>
         </aside>
       </div><footer class="bms-ed-status"></footer>`;
     root.style.left = "8px";
@@ -545,12 +549,9 @@
       renderEditorControls();
       drawEditorViewport();
     }
-    const category = event.target.closest?.("[data-category]")?.dataset.category;
-    if (category) {
-      editorCategory[editorLayer] = category;
-      editorQuery = "";
-      const input = document.querySelector(`#${EDITOR_ID} .bms-ed-search`);
-      if (input) input.value = "";
+    const group = event.target.closest?.("[data-group-head]")?.dataset.groupHead;
+    if (group) {
+      toggleEditorGroup(editorLayer, group);
       renderEditorPalette();
     }
     const assetButton = event.target.closest?.("[data-asset-id]");
@@ -570,32 +571,42 @@
     drawEditorViewport();
   }
 
+  function isEditorGroupCollapsed(layer, key) {
+    const state = editorGroupState[layer];
+    return state.has(key) ? state.get(key) : layer === EDITOR_LAYER_OBJECT;
+  }
+
+  function toggleEditorGroup(layer, key) {
+    editorGroupState[layer].set(key, !isEditorGroupCollapsed(layer, key));
+  }
+
   function renderEditorPalette() {
     const root = document.getElementById(EDITOR_ID);
     if (!root) return;
     root.querySelectorAll("[data-layer]").forEach(button => button.classList.toggle("bms-ed-active", button.dataset.layer === editorLayer));
     const materials = editorMaterials[editorLayer];
     const categories = [...new Set(materials.map(item => item.type))];
-    const recent = editorRecent.filter(item => item.layer === editorLayer && materials.some(current => current.id === item.id));
-    const categoryHost = root.querySelector(".bms-ed-categories");
-    categoryHost.innerHTML = `${recent.length ? '<button data-category="recent">最近</button>' : ""}${categories.map(type => {
-      const label = EDITOR_CATEGORY_LABELS[type] || "其他分类";
-      return `<button data-category="${escapeHTML(type)}" title="${escapeHTML(label)}">${escapeHTML(label)}</button>`;
-    }).join("")}`;
-    categoryHost.querySelectorAll("[data-category]").forEach(button => button.classList.toggle("bms-ed-active", !editorQuery && button.dataset.category === editorCategory[editorLayer]));
-
-    let visible;
-    if (editorQuery) visible = filterEditorMaterials(materials, "", editorQuery);
-    else if (editorCategory[editorLayer] === "recent") visible = recent;
-    else visible = filterEditorMaterials(materials, editorCategory[editorLayer]);
-    const assets = root.querySelector(".bms-ed-assets");
-    assets.innerHTML = visible.length ? visible.map(material => {
-      const selected = editorSelected?.layer === material.layer && editorSelected.id === material.id;
-      const title = material.owned
-        ? `${EDITOR_CATEGORY_LABELS[material.type] || "其他素材"} / ${material.label} · ID ${material.id}`
-        : `需要持有 ${material.definition.AssetGroup} / ${material.definition.AssetName}`;
-      return `<button class="bms-ed-asset${selected ? " bms-ed-selected" : ""}${material.owned ? "" : " bms-ed-locked"}" data-asset-id="${material.id}" title="${escapeHTML(title)}" ${material.owned ? "" : "disabled"}><img src="${escapeHTML(editorMaterialPath(material))}" alt=""><span>${escapeHTML(material.label)}</span></button>`;
-    }).join("") : '<div class="bms-ed-empty">没有匹配的素材</div>';
+    // 最近分类固定存在，始终置顶；其余按分类生成折叠组
+    const groups = [
+      { key: "recent", label: "最近", items: editorRecent.filter(item => item.layer === editorLayer && materials.some(current => current.id === item.id)) },
+      ...categories.map(type => ({ key: type, label: EDITOR_CATEGORY_LABELS[type] || "其他分类", items: filterEditorMaterials(materials, type) })),
+    ];
+    const groupHost = root.querySelector(".bms-ed-groups");
+    groupHost.innerHTML = groups.map(group => {
+      const visible = editorQuery ? filterEditorMaterials(group.items, "", editorQuery) : group.items;
+      if (editorQuery && visible.length === 0) return "";
+      const collapsed = isEditorGroupCollapsed(editorLayer, group.key);
+      const body = visible.length ? visible.map(material => {
+        const selected = editorSelected?.layer === material.layer && editorSelected.id === material.id;
+        const title = material.owned
+          ? `${EDITOR_CATEGORY_LABELS[material.type] || "其他素材"} / ${material.label} · ID ${material.id}`
+          : `需要持有 ${material.definition.AssetGroup} / ${material.definition.AssetName}`;
+        return `<button class="bms-ed-asset${selected ? " bms-ed-selected" : ""}${material.owned ? "" : " bms-ed-locked"}" data-asset-id="${material.id}" title="${escapeHTML(title)}" ${material.owned ? "" : "disabled"}><img src="${escapeHTML(editorMaterialPath(material))}" alt=""><span>${escapeHTML(material.label)}</span></button>`;
+      }).join("") : `<div class="bms-ed-empty">${group.key === "recent" ? "暂无最近使用的素材" : "暂无素材"}</div>`;
+      return `<section class="bms-ed-group${collapsed ? " bms-ed-collapsed" : ""}" data-group="${escapeHTML(group.key)}">
+        <button class="bms-ed-group-head" data-group-head="${escapeHTML(group.key)}"><span>${escapeHTML(group.label)}</span><span class="bms-ed-group-count">${visible.length}</span><span class="bms-ed-group-chevron">▾</span></button>
+        <div class="bms-ed-group-body"><div class="bms-ed-assets">${body}</div></div></section>`;
+    }).join("");
     const selection = root.querySelector(".bms-ed-selection");
     selection.innerHTML = editorSelected
       ? `当前：<strong>${editorSelected.layer === EDITOR_LAYER_TILE ? "地块" : "物件"} · ${escapeHTML(EDITOR_CATEGORY_LABELS[editorSelected.type] || "其他素材")} / ${escapeHTML(editorSelected.label)}</strong>`
