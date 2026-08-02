@@ -2029,13 +2029,20 @@
     if (typeof globalThis.ChatRoomSyncRoomProperties === "function") {
       modApi.hookFunction("ChatRoomSyncRoomProperties", 1000, (args, next) => {
         const result = next(args);
-        minimapGrid = null; // 房间属性替换：强制重建
-        minimapDirty = true;
+        // 只有地图数据真实变化才重建底图并重新适配视图；白名单哨兵同步等仅刷新
+        // 房间属性而地图未变的场景保留当前缩放与平移，避免传送别人后视图跳回全图。
+        const room = getChatRoomData();
+        const nextMapSignature = `${room?.MapData?.Tiles ?? ""}|${room?.MapData?.Objects ?? ""}`;
+        const currentMapSignature = minimapGrid ? `${minimapGrid.tiles}|${minimapGrid.objects}` : "";
+        if (!minimapGrid || nextMapSignature !== currentMapSignature) {
+          minimapGrid = null; // 地图数据变化：强制重建底图
+          minimapDirty = true;
+          minimapFitted = false; // 地图更换：重新适配视图
+        }
         minimapPlayerSig = ""; // 同步可能替换角色数据对象，强制下个 tick 重建名单
         const selected = minimapSelected != null ? findRoomCharacter(minimapSelected) : null;
         if (!selected || isCharacterHidden(selected)) minimapSelected = currentMemberNumber(); // 仅在原选中不可操作时兜底回自己
         minimapPending = null;
-        minimapFitted = false; // 地图可能更换：重新适配视图
         return result;
       });
     }

@@ -602,6 +602,23 @@ test("minimap stays closed by default and only opens on demand", () => {
   assert.match(minimapSource, /function toggleMinimap\(\)/);
 });
 
+test("room property sync keeps minimap zoom unless the map data changed", () => {
+  const minimapSource = fs.readFileSync(path.join(root, "src", "05-minimap.js"), "utf8");
+  // 白名单哨兵同步会触发 ChatRoomSyncRoomProperties，但地图本身未变化：
+  // 此时必须保留当前缩放与平移，只有 Tiles/Objects 真实变化才重建底图并重新适配视图。
+  assert.match(minimapSource, /nextMapSignature/);
+  assert.match(minimapSource, /currentMapSignature/);
+  assert.match(minimapSource, /保留当前缩放与平移/);
+  assert.match(minimapSource, /minimapFitted = false; \/\/ 地图更换：重新适配视图/);
+  // minimapFitted 的重置必须被限定在“地图数据变化”分支内，不能出现在同步 hook 顶层
+  const hookBody = minimapSource.slice(
+    minimapSource.indexOf("ChatRoomSyncRoomProperties\", 1000"),
+    minimapSource.indexOf("return result;\n      });\n    }\n    if (typeof globalThis.ChatRoomLeave"),
+  );
+  assert.match(hookBody, /minimapFitted = false/);
+  assert.ok(hookBody.indexOf("nextMapSignature") < hookBody.indexOf("minimapFitted = false"));
+});
+
 test("reachability detects enclosed areas for non-admin teleport", () => {
   const tiles = String.fromCharCode(100).repeat(1600);
   const objects = String.fromCharCode(0).repeat(1600);
