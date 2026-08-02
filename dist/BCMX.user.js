@@ -2,7 +2,7 @@
 // @name         Bondage Club - BCMX（核心脚本）
 // @name:zh-CN   Bondage Club - 地图功能强化（核心脚本）
 // @namespace    https://github.com/stareyeXuanyeLin/BC-MX
-// @version      0.3.2
+// @version      0.3.3
 // @description  Bondage Club 地图功能强化：本地存档、小地图、管理员传送与自由地图编辑器。
 // @description:zh-CN 地图功能强化：本地保存与重建聊天室地图、小地图实时概览、管理员传送与自由地图编辑。
 // @author       林宣夜＆佩菈
@@ -28,7 +28,7 @@
 
   const MOD_NAME = "BCMX";
   const FULL_NAME = "BC Map eXtended";
-  const VERSION = "0.3.2";
+  const VERSION = "0.3.3";
   const STORAGE_SCHEMA_VERSION = 1;
   const RECORD_STORAGE_VERSION = 1;
   // 文件格式标识沿用历史值（BC_MAP_SAVER_*），保证旧版本导出的文件可继续导入，反之亦然。
@@ -2480,9 +2480,7 @@
     canvas.addEventListener("pointerup", editorHandlePointerUp);
     canvas.addEventListener("pointercancel", editorHandlePointerUp);
     canvas.addEventListener("pointerleave", () => { editorHover = null; updateEditorCoordinate(); drawEditorViewport(); });
-    const blockBrowserMouseGesture = event => { event.preventDefault(); event.stopPropagation(); };
-    canvas.addEventListener("contextmenu", blockBrowserMouseGesture);
-    canvas.addEventListener("auxclick", blockBrowserMouseGesture);
+    canvas.addEventListener("contextmenu", event => event.preventDefault());
     return root;
   }
 
@@ -2922,6 +2920,7 @@
     renderEditorControls();
     queueEditorMapRender();
     setTimeout(fitEditorView, 0);
+    toast("按住右键或中键拖拽平移；若鼠标手势干扰，请在手势软件中禁用鼠标手势", "info");
     return true;
   }
 
@@ -2989,31 +2988,8 @@
       return next(args);
     });
   }
-
-  // 手势屏蔽：浏览器手势扩展通常在 document/window 捕获阶段先行监听，
-  // 画布冒泡阶段的 preventDefault 无法取消它们已执行的逻辑。
-  // 因此在捕获阶段直接处理画布指针事件，并阻止事件继续传播。
-  globalThis.addEventListener?.("pointerdown", event => {
-    if (!editorOpen) return;
-    const root = document.getElementById(EDITOR_ID);
-    const canvas = root?.querySelector(".bms-ed-canvas");
-    if (!canvas || !canvas.contains(event.target)) return;
-    const panning = event.button === 2 || event.button === 1 || (event.button === 0 && editorSpaceDown);
-    const drawing = event.button === 0 && !panning;
-    if (!panning && !drawing) return;
-    editorHandlePointerDown(event);
-    if (event.defaultPrevented) event.stopImmediatePropagation();
-  }, true);
-  const blockEditorContextMenu = event => {
-    if (!editorOpen) return;
-    const root = document.getElementById(EDITOR_ID);
-    if (root?.contains(event.target)) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    }
-  };
-  globalThis.addEventListener?.("contextmenu", blockEditorContextMenu, true);
-  globalThis.addEventListener?.("auxclick", blockEditorContextMenu, true);
+  // 鼠标手势（浏览器扩展/系统手势软件）无法从网页层屏蔽，拦截代码会与画布交互互相干扰；
+  // 因此不尝试屏蔽，改为提示用户自行在手势软件中禁用。
 }
 
 

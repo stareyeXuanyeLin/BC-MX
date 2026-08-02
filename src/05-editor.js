@@ -510,9 +510,7 @@
     canvas.addEventListener("pointerup", editorHandlePointerUp);
     canvas.addEventListener("pointercancel", editorHandlePointerUp);
     canvas.addEventListener("pointerleave", () => { editorHover = null; updateEditorCoordinate(); drawEditorViewport(); });
-    const blockBrowserMouseGesture = event => { event.preventDefault(); event.stopPropagation(); };
-    canvas.addEventListener("contextmenu", blockBrowserMouseGesture);
-    canvas.addEventListener("auxclick", blockBrowserMouseGesture);
+    canvas.addEventListener("contextmenu", event => event.preventDefault());
     return root;
   }
 
@@ -952,6 +950,7 @@
     renderEditorControls();
     queueEditorMapRender();
     setTimeout(fitEditorView, 0);
+    toast("按住右键或中键拖拽平移；若鼠标手势干扰，请在手势软件中禁用鼠标手势", "info");
     return true;
   }
 
@@ -1019,29 +1018,6 @@
       return next(args);
     });
   }
-
-  // 手势屏蔽：浏览器手势扩展通常在 document/window 捕获阶段先行监听，
-  // 画布冒泡阶段的 preventDefault 无法取消它们已执行的逻辑。
-  // 因此在捕获阶段直接处理画布指针事件，并阻止事件继续传播。
-  globalThis.addEventListener?.("pointerdown", event => {
-    if (!editorOpen) return;
-    const root = document.getElementById(EDITOR_ID);
-    const canvas = root?.querySelector(".bms-ed-canvas");
-    if (!canvas || !canvas.contains(event.target)) return;
-    const panning = event.button === 2 || event.button === 1 || (event.button === 0 && editorSpaceDown);
-    const drawing = event.button === 0 && !panning;
-    if (!panning && !drawing) return;
-    editorHandlePointerDown(event);
-    if (event.defaultPrevented) event.stopImmediatePropagation();
-  }, true);
-  const blockEditorContextMenu = event => {
-    if (!editorOpen) return;
-    const root = document.getElementById(EDITOR_ID);
-    if (root?.contains(event.target)) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    }
-  };
-  globalThis.addEventListener?.("contextmenu", blockEditorContextMenu, true);
-  globalThis.addEventListener?.("auxclick", blockEditorContextMenu, true);
+  // 鼠标手势（浏览器扩展/系统手势软件）无法从网页层屏蔽，拦截代码会与画布交互互相干扰；
+  // 因此不尝试屏蔽，改为提示用户自行在手势软件中禁用。
 }

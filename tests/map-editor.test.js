@@ -179,6 +179,11 @@ test("editor UI wraps categories, fills the viewport and uses right-button panni
   assert.doesNotMatch(editorSource, /data-tool="pan"/);
   assert.match(editorSource, /event\.button === 2 \|\| event\.button === 1/);
   assert.doesNotMatch(editorSource, /temporaryEraser/);
+  // 不尝试屏蔽浏览器手势：拦截代码与画布交互互相干扰且对扩展无效，改为提示用户自行关闭
+  assert.doesNotMatch(editorSource, /stopImmediatePropagation/);
+  assert.doesNotMatch(editorSource, /blockEditorContextMenu/);
+  assert.doesNotMatch(editorSource, /blockBrowserMouseGesture/);
+  assert.match(editorSource, /在手势软件中禁用鼠标手势/);
 });
 
 test("editor entry requires admin map view and no native edit submode", () => {
