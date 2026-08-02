@@ -48,7 +48,16 @@ function createRuntime(overrides = {}) {
     ChatRoomMapViewEditMode: "",
     ChatRoomMapViewTileLookup: {},
     ChatRoomMapViewObjectLookup: {},
-    ChatRoomMapManager: { Map: { exportString: () => "map", importString: () => true } },
+    ChatRoomMapManager: {
+      Map: {
+        exportString: () => "map",
+        importString: () => true,
+        _effects: Array.from({ length: 1600 }, () => []),
+        getAllEffects() { return this._effects; },
+        replaceAllEffects(list) { this._effects = list; },
+        updateGlobalMapData() { return true; },
+      },
+    },
     ChatRoomMapViewUpdateFlag: () => {},
     ChatRoomMapViewCalculatePerceptionMasks: () => {},
     ...overrides,
@@ -110,13 +119,17 @@ test("unique object write removes prior copies and keeps only the first brush ce
   assert.equal(mapData.Objects.charCodeAt(800), api.constants.EDITOR_OBJECT_BLANK_ID);
 });
 
-test("eraser writes tile blank 0 and object blank 100", () => {
+test("tiles cannot be erased, only objects are deleted via the blank object", () => {
   const { api, context } = createRuntime();
   const mapData = context.ChatRoomData.MapData;
   const cells = [{ index: 42 }];
-  api.applyEditorStroke(mapData, "tile", 0, cells);
-  api.applyEditorStroke(mapData, "object", api.constants.EDITOR_OBJECT_BLANK_ID, cells);
-  assert.equal(mapData.Tiles.charCodeAt(42), 0);
+  // 地块层没有空白概念：写 0 被拒绝，地块只能被其它地块覆盖
+  assert.equal(api.applyEditorStroke(mapData, "tile", 0, cells), false);
+  assert.equal(mapData.Tiles.charCodeAt(42), 100);
+  // 物件层通过空白物件删除
+  assert.equal(api.applyEditorStroke(mapData, "object", 200, cells), true);
+  assert.equal(mapData.Objects.charCodeAt(42), 200);
+  assert.equal(api.applyEditorStroke(mapData, "object", api.constants.EDITOR_OBJECT_BLANK_ID, cells), true);
   assert.equal(mapData.Objects.charCodeAt(42), 100);
 });
 
@@ -171,6 +184,80 @@ test("hexagon floor and wall styles share the same name and get disambiguated la
   ]);
   // 子串搜索仍能命中
   assert.deepEqual(plain(api.filterEditorMaterials(api.buildEditorMaterials("tile", lookup), "", "紫色六边形")).map(item => item.label), ["紫色六边形（地面）", "紫色六边形（墙壁）"]);
+});
+
+test("lighting materials are built from the native effect list as a tile-category group", () => {
+  const { api } = createRuntime();
+  const list = [
+    { ID: 10, Type: "StaticLighting", TypeId: 1, Color: [0, 0, 0, 0.0] },
+    { ID: 11, Type: "StaticLighting", TypeId: 1, Color: [0, 0, 0, 0.2] },
+    { ID: 14, Type: "StaticLighting", TypeId: 1, Color: [255, 0, 0, 0.3] },
+    { ID: 17, Type: "StaticLighting", TypeId: 1, Color: [255, 255, 0, 0.3] },
+  ];
+  const materials = plain(api.buildLightingMaterials(list));
+  assert.deepEqual(materials.map(m => ({ id: m.id, layer: m.layer, type: m.type, label: m.label, owned: m.owned })), [
+    { id: 10, layer: "tile", type: "Lighting", label: "无光照", owned: true },
+    { id: 11, layer: "tile", type: "Lighting", label: "浅阴影", owned: true },
+    { id: 14, layer: "tile", type: "Lighting", label: "红色光照", owned: true },
+    { id: 17, layer: "tile", type: "Lighting", label: "黄色光照", owned: true },
+  ]);
+  // 素材色块是内联 SVG，不依赖原版贴图
+  const swatch = api.editorLightingSwatch(materials[2]);
+  assert.match(swatch, /^data:image\/svg\+xml,/);
+  assert.match(decodeURIComponent(swatch), /rgba\(255,0,0,0\.3\)/);
+});
+
+test("lighting strokes write and clear the effects layer without touching tiles", () => {
+  const { api, context } = createRuntime();
+  const mapData = context.ChatRoomData.MapData;
+  mapData.Effects = Array.from({ length: 1600 }, () => []);
+  const cells = [{ index: 5 }, { index: 6 }];
+  const effect = { ID: 14, Type: "StaticLighting", TypeId: 1, Color: [255, 0, 0, 0.3] };
+  assert.equal(api.applyEditorStroke(mapData, "tile", 14, cells, effect), true);
+  assert.deepEqual(plain(mapData.Effects[5]), [effect]);
+  assert.deepEqual(plain(mapData.Effects[6]), [effect]);
+  assert.equal(mapData.Tiles.charCodeAt(5), 100); // 地块字符串未被触碰
+  assert.equal(mapData.Tiles.charCodeAt(6), 100);
+  // 无光照（空白 ID 10）清除效果
+  assert.equal(api.applyEditorStroke(mapData, "tile", api.constants.EDITOR_LIGHTING_BLANK_ID, cells, effect), true);
+  assert.deepEqual(plain(mapData.Effects[5]), []);
+  assert.deepEqual(plain(mapData.Effects[6]), []);
+  // 同值重涂返回 false
+  assert.equal(api.applyEditorStroke(mapData, "tile", api.constants.EDITOR_LIGHTING_BLANK_ID, cells, effect), false);
+});
+
+test("lighting effects round-trip through the working snapshot and one-way push", () => {
+  const { api, context } = createRuntime();
+  const manager = context.ChatRoomMapManager.Map;
+  manager._effects = Array.from({ length: 1600 }, () => []);
+  const working = api.editorSnapshotWorking();
+  const effect = { ID: 12, Type: "StaticLighting", TypeId: 1, Color: [0, 0, 0, 0.5] };
+  working.Effects[10] = [effect];
+  assert.equal(api.editorPushWorkingToMap(working), true);
+  assert.deepEqual(plain(manager._effects[10]), [effect]);
+  // 一致时不再写回
+  assert.equal(api.editorPushWorkingToMap(working), false);
+  // 外部把效果改走后，单向覆盖恢复工作副本
+  manager._effects[10] = [];
+  assert.equal(api.editorPushWorkingToMap(working), true);
+  assert.deepEqual(plain(manager._effects[10]), [effect]);
+  // 快照不共享内部数组引用
+  manager._effects[11] = [effect];
+  const snapshot = api.editorSnapshotWorking();
+  manager._effects[11] = [];
+  assert.deepEqual(plain(snapshot.Effects[11]), [effect]);
+});
+
+test("editor UI disables the eraser on the tile layer and ships lighting swatches", () => {
+  const editorSource = fs.readFileSync(path.join(root, "src", "05-editor.js"), "utf8");
+  // 地块无法删除：橡皮只对物件层可用，切到地块层自动切回画笔
+  assert.match(editorSource, /eraser\.disabled = editorLayer === EDITOR_LAYER_TILE/);
+  assert.match(editorSource, /地块无法删除，只能覆盖/);
+  assert.match(editorSource, /Lighting: "光照"/);
+  // 光照素材归入地块大类并写入 Effects 层
+  assert.match(editorSource, /definition\?\.Type === "StaticLighting"/);
+  assert.match(editorSource, /getChatRoomMapViewEffectList/);
+  assert.match(editorSource, /data:image\/svg\+xml,/);
 });
 
 test("asset-bound objects are greyed logically when inventory ownership is missing", () => {

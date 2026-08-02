@@ -18,14 +18,20 @@
   const EDITOR_LAYER_TILE = "tile";
   const EDITOR_LAYER_OBJECT = "object";
   const EDITOR_OBJECT_BLANK_ID = 100;
+  const EDITOR_LIGHTING_BLANK_ID = 10;
   const EDITOR_TOOL_BRUSH = "brush";
   const EDITOR_TOOL_ERASER = "eraser";
   const EDITOR_CATEGORY_LABELS = Object.freeze({
-    Floor: "室内地面", FloorExterior: "室外地面", Wall: "墙壁", Water: "水面",
+    Floor: "室内地面", FloorExterior: "室外地面", Wall: "墙壁", Water: "水面", Lighting: "光照",
     FloorDecoration: "地面装饰", FloorDecorationThemed: "主题装饰", FloorDecorationParty: "派对装饰",
     FloorDecorationCamping: "露营装饰", FloorDecorationExpanding: "扩展装饰", FloorDecorationAnimal: "动物装饰",
     FloorItem: "大型设施", FloorObstacle: "障碍物", FloorNumber: "数字", FloorLetter: "字母", FloorIcon: "地面图标",
     WallDecoration: "墙面装饰", WallPath: "门与通道", Banners: "旗帜",
+  });
+  // 原版光照调色板（ChatRoomMapViewEffectList）：ID 10 为空白，11~17 为阴影/染色预设
+  const EDITOR_LIGHTING_LABELS = Object.freeze({
+    10: "无光照", 11: "浅阴影", 12: "中阴影", 13: "深阴影",
+    14: "红色光照", 15: "蓝色光照", 16: "绿色光照", 17: "黄色光照",
   });
   const EDITOR_STYLE_LABELS = Object.freeze({
     OakWood: "橡木地板", Stone: "石材", Pavement: "铺路砖", Ceramic: "浅色陶瓷", CeramicDark: "深色陶瓷",
@@ -83,7 +89,7 @@
   let editorSpaceDown = false;
   let editorHistory = createEditorHistory();
   let editorWorking = null; // 编辑器权威工作副本：打开时快照，渲染与撤销都以它为准，单向覆盖地图
-  let editorMaterials = { tile: [], object: [] };
+  let editorMaterials = { tile: [], object: [], lighting: [] };
   let editorRecent = [];
   let editorLastTick = 0;
   let editorOffscreen = null;
@@ -104,6 +110,13 @@
       if (typeof ChatRoomMapViewObjectList !== "undefined") return ChatRoomMapViewObjectList;
     } catch (_) { /* fall through */ }
     return globalThis.ChatRoomMapViewObjectList ?? null;
+  }
+
+  function getChatRoomMapViewEffectList() {
+    try {
+      if (typeof ChatRoomMapViewEffectList !== "undefined") return ChatRoomMapViewEffectList;
+    } catch (_) { /* fall through */ }
+    return globalThis.ChatRoomMapViewEffectList ?? null;
   }
 
   function getChatRoomMapViewEditMode() {
@@ -201,14 +214,64 @@
     });
   }
 
+  // 光照素材归入地块大类（layer 沿用 tile），写入时按 definition.Type 走 Effects 层
+  function buildLightingMaterials(list) {
+    return (Array.isArray(list) ? list : []).map(effect => ({
+      id: effect.ID,
+      layer: EDITOR_LAYER_TILE,
+      type: "Lighting",
+      style: `Light${effect.ID}`,
+      label: EDITOR_LIGHTING_LABELS[effect.ID] || `光照 ${effect.ID}`,
+      owned: true,
+      unique: false,
+      definition: effect,
+    }));
+  }
+
   function editorMaterialPath(material) {
     if (!material) return "";
     const base = material.layer === EDITOR_LAYER_TILE ? "MapTile" : "MapObject";
     return `Screens/Online/ChatRoom/${base}/${material.type}/${material.style}.png`;
   }
 
+  // 光照素材没有贴图，用 Color 生成半透明色块 SVG 缩略图
+  function editorLightingSwatch(material) {
+    const color = Array.isArray(material?.definition?.Color) ? material.definition.Color : [0, 0, 0, 0];
+    const fill = `rgba(${color[0]},${color[1]},${color[2]},${color[3]})`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#16273e"/><rect x="8" y="8" width="48" height="48" rx="6" fill="${fill}" stroke="#5c7ea8" stroke-width="2"/></svg>`;
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  }
+
+  function editorMaterialImage(material) {
+    if (material?.type === "Lighting") return editorLightingSwatch(material);
+    return editorMaterialPath(material);
+  }
+
+  // Effects 是每格一个效果数组的三层结构；快照与历史必须深拷贝，避免与原版 MapManager 共享引用
+  function editorCloneEffects(effects) {
+    if (!Array.isArray(effects)) return [];
+    return effects.map(list => (Array.isArray(list) ? list.slice() : list));
+  }
+
+  function editorEffectsEqual(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      const la = a[i] || [];
+      const lb = b[i] || [];
+      if (la.length !== lb.length) return false;
+      for (let j = 0; j < la.length; j++) {
+        if (la[j]?.ID !== lb[j]?.ID) return false;
+      }
+    }
+    return true;
+  }
+
   function editorSnapshot(mapData) {
-    return { Tiles: String(mapData?.Tiles ?? ""), Objects: String(mapData?.Objects ?? "") };
+    return {
+      Tiles: String(mapData?.Tiles ?? ""),
+      Objects: String(mapData?.Objects ?? ""),
+      Effects: editorCloneEffects(mapData?.Effects),
+    };
   }
 
   function createEditorHistory() {
@@ -219,7 +282,7 @@
     if (!history || !mapData) return false;
     const snapshot = editorSnapshot(mapData);
     const last = history.undo[history.undo.length - 1];
-    if (!last || last.Tiles !== snapshot.Tiles || last.Objects !== snapshot.Objects) {
+    if (!last || last.Tiles !== snapshot.Tiles || last.Objects !== snapshot.Objects || !editorEffectsEqual(last.Effects, snapshot.Effects)) {
       history.undo.push(snapshot);
       if (history.undo.length > EDITOR_HISTORY_LIMIT) history.undo.shift();
     }
@@ -231,6 +294,7 @@
     if (!mapData || !snapshot || typeof snapshot.Tiles !== "string" || typeof snapshot.Objects !== "string") return false;
     mapData.Tiles = snapshot.Tiles;
     mapData.Objects = snapshot.Objects;
+    if (Array.isArray(snapshot.Effects)) mapData.Effects = editorCloneEffects(snapshot.Effects);
     return true;
   }
 
@@ -266,11 +330,31 @@
 
   function applyEditorStroke(mapData, layer, id, cells, definition = null) {
     if (!mapData || !Array.isArray(cells) || cells.length === 0) return false;
+    // 光照素材（归入地块大类）：写入 Effects 数组，不碰 Tiles 字符串
+    if (definition?.Type === "StaticLighting") {
+      const effects = mapData.Effects;
+      if (!Array.isArray(effects)) return false;
+      const valid = cells.filter(cell => Number.isInteger(cell?.index) && cell.index >= 0 && cell.index < effects.length);
+      if (valid.length === 0) return false;
+      const list = Number(id) === EDITOR_LIGHTING_BLANK_ID ? [] : [definition];
+      let changed = false;
+      for (const cell of valid) {
+        const before = (effects[cell.index] || []).map(effect => effect?.ID).join(",");
+        const next = list.map(effect => effect.ID).join(",");
+        if (before !== next) {
+          effects[cell.index] = list.slice();
+          changed = true;
+        }
+      }
+      return changed;
+    }
     const key = layer === EDITOR_LAYER_OBJECT ? "Objects" : "Tiles";
     const source = mapData[key];
     if (typeof source !== "string" || source.length === 0) return false;
     const writeId = Number(id);
     if (!Number.isInteger(writeId) || writeId < 0 || writeId > 0xFFFF) return false;
+    // 地块层没有空白概念，只能被其它地块覆盖，不允许写空 0
+    if (layer === EDITOR_LAYER_TILE && writeId === 0) return false;
     let next = source;
     const valid = cells.filter(cell => Number.isInteger(cell?.index) && cell.index >= 0 && cell.index < source.length);
     if (valid.length === 0) return false;
@@ -313,21 +397,40 @@
   }
 
   // 编辑器权威副本：绘制、撤销与渲染都只读写 editorWorking；对外部同步只做单向覆盖。
+  // Effects 数据在 ChatRoomMapManager 内部（MapData.Effects 只是编码字符串），快照从 MapManager 深拷贝。
   function editorSnapshotWorking() {
     const mapData = editorMapData();
     if (!mapData) return null;
-    return { Tiles: String(mapData.Tiles ?? ""), Objects: String(mapData.Objects ?? "") };
+    const manager = getChatRoomMapManager();
+    return {
+      Tiles: String(mapData.Tiles ?? ""),
+      Objects: String(mapData.Objects ?? ""),
+      Effects: editorCloneEffects(manager?.Map?.getAllEffects?.() ?? []),
+    };
   }
 
   // 单向覆盖：把编辑器工作副本写回 ChatRoomData.MapData（游戏画面与原版发送链路读到的都是它）。
   // 可选传入 working 参数便于测试；运行时使用模块工作副本。
+  // Effects 走 ChatRoomMapManager：replaceAllEffects 替换内部数组，updateGlobalMapData 编码进 MapData.Effects。
   function editorPushWorkingToMap(working = editorWorking) {
     const mapData = editorMapData();
     if (!mapData || !working) return false;
-    if (mapData.Tiles === working.Tiles && mapData.Objects === working.Objects) return false;
-    mapData.Tiles = working.Tiles;
-    mapData.Objects = working.Objects;
-    return true;
+    let changed = false;
+    if (mapData.Tiles !== working.Tiles || mapData.Objects !== working.Objects) {
+      mapData.Tiles = working.Tiles;
+      mapData.Objects = working.Objects;
+      changed = true;
+    }
+    if (Array.isArray(working.Effects)) {
+      const manager = getChatRoomMapManager();
+      const current = manager?.Map?.getAllEffects?.();
+      if (Array.isArray(current) && !editorEffectsEqual(current, working.Effects)) {
+        manager.Map.replaceAllEffects(editorCloneEffects(working.Effects));
+        if (typeof manager.Map.updateGlobalMapData === "function") manager.Map.updateGlobalMapData();
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   // 按原版 ChatRoomMapViewUpdateFlag 的清理规则预检物件落点，避免画出必被原版清除的内容。
@@ -370,10 +473,13 @@
     const erasing = editorTool === EDITOR_TOOL_ERASER;
     const material = editorSelected?.layer === editorLayer ? editorSelected : null;
     if (!erasing && !material) return false;
+    // 地块层没有空白概念：地块只能被其它地块覆盖，不允许删除；光照清除使用“无光照”素材
+    if (erasing && editorLayer === EDITOR_LAYER_TILE) {
+      toast("地块无法删除，只能覆盖", "error");
+      return false;
+    }
     let cells = editorBrushCells(gx, gy, editorBrushSize, size.width, size.height);
-    const id = erasing
-      ? (editorLayer === EDITOR_LAYER_OBJECT ? EDITOR_OBJECT_BLANK_ID : 0)
-      : material.id;
+    const id = erasing ? EDITOR_OBJECT_BLANK_ID : material.id;
     if (!erasing && editorLayer === EDITOR_LAYER_OBJECT && material.definition) {
       const tileLookup = getChatRoomMapViewTileLookup();
       cells = cells.filter(cell => editorObjectCellCompatible(editorWorking.Tiles, cell.x, cell.y, size.width, size.height, material.definition, tileLookup));
@@ -391,10 +497,14 @@
   function syncEditorMaterials() {
     const tileList = getChatRoomMapViewTileList();
     const objectList = getChatRoomMapViewObjectList();
+    const effectList = getChatRoomMapViewEffectList();
     editorMaterials.tile = buildEditorMaterials(EDITOR_LAYER_TILE, tileList ?? getChatRoomMapViewTileLookup());
     editorMaterials.object = buildEditorMaterials(EDITOR_LAYER_OBJECT, objectList ?? getChatRoomMapViewObjectLookup());
+    editorMaterials.lighting = buildLightingMaterials(effectList);
     if (editorSelected) {
-      editorSelected = editorMaterials[editorSelected.layer].find(item => item.id === editorSelected.id) ?? null;
+      const layer = editorSelected.layer;
+      const candidates = layer === EDITOR_LAYER_TILE ? [...editorMaterials.tile, ...editorMaterials.lighting] : editorMaterials[layer];
+      editorSelected = candidates.find(item => item.id === editorSelected.id) ?? null;
     }
   }
 
@@ -546,6 +656,11 @@
     if ([EDITOR_LAYER_TILE, EDITOR_LAYER_OBJECT].includes(layer)) {
       editorLayer = layer;
       editorSelected = editorSelected?.layer === layer ? editorSelected : null;
+      // 地块无法删除：切到地块层时若正持橡皮，自动切回画笔
+      if (layer === EDITOR_LAYER_TILE && editorTool === EDITOR_TOOL_ERASER) {
+        editorTool = EDITOR_TOOL_BRUSH;
+        toast("地块无法删除，只能覆盖，已切换为画笔", "info");
+      }
       editorQuery = "";
       const input = document.querySelector(`#${EDITOR_ID} .bms-ed-search`);
       if (input) input.value = "";
@@ -561,7 +676,10 @@
     const assetButton = event.target.closest?.("[data-asset-id]");
     if (assetButton && !assetButton.disabled) {
       const id = Number(assetButton.dataset.assetId);
-      const material = editorMaterials[editorLayer].find(item => item.id === id);
+      const candidates = editorLayer === EDITOR_LAYER_TILE
+        ? [...editorMaterials.tile, ...editorMaterials.lighting]
+        : editorMaterials[editorLayer];
+      const material = candidates.find(item => item.id === id);
       if (material?.owned) selectEditorMaterial(material);
     }
   }
@@ -588,7 +706,9 @@
     const root = document.getElementById(EDITOR_ID);
     if (!root) return;
     root.querySelectorAll("[data-layer]").forEach(button => button.classList.toggle("bms-ed-active", button.dataset.layer === editorLayer));
-    const materials = editorMaterials[editorLayer];
+    const materials = editorLayer === EDITOR_LAYER_TILE
+      ? [...editorMaterials.tile, ...editorMaterials.lighting]
+      : editorMaterials[editorLayer];
     const categories = [...new Set(materials.map(item => item.type))];
     // 最近分类固定存在，始终置顶；其余按分类生成折叠组
     const groups = [
@@ -605,7 +725,7 @@
         const title = material.owned
           ? `${EDITOR_CATEGORY_LABELS[material.type] || "其他素材"} / ${material.label} · ID ${material.id}`
           : `需要持有 ${material.definition.AssetGroup} / ${material.definition.AssetName}`;
-        return `<button class="bms-ed-asset${selected ? " bms-ed-selected" : ""}${material.owned ? "" : " bms-ed-locked"}" data-asset-id="${material.id}" title="${escapeHTML(title)}" ${material.owned ? "" : "disabled"}><img src="${escapeHTML(editorMaterialPath(material))}" alt=""><span>${escapeHTML(material.label)}</span></button>`;
+        return `<button class="bms-ed-asset${selected ? " bms-ed-selected" : ""}${material.owned ? "" : " bms-ed-locked"}" data-asset-id="${material.id}" title="${escapeHTML(title)}" ${material.owned ? "" : "disabled"}><img src="${escapeHTML(editorMaterialImage(material))}" alt=""><span>${escapeHTML(material.label)}</span></button>`;
       }).join("") : `<div class="bms-ed-empty">${group.key === "recent" ? "暂无最近使用的素材" : "暂无素材"}</div>`;
       return `<section class="bms-ed-group${collapsed ? " bms-ed-collapsed" : ""}" data-group="${escapeHTML(group.key)}">
         <button class="bms-ed-group-head" data-group-head="${escapeHTML(group.key)}"><span>${escapeHTML(group.label)}</span><span class="bms-ed-group-count">${visible.length}</span><span class="bms-ed-group-chevron">▾</span></button>
@@ -621,6 +741,12 @@
     const root = document.getElementById(EDITOR_ID);
     if (!root) return;
     root.querySelectorAll("[data-tool]").forEach(button => button.classList.toggle("bms-ed-active", button.dataset.tool === editorTool));
+    // 地块层无法删除：橡皮只对物件层可用
+    const eraser = root.querySelector('[data-tool="eraser"]');
+    if (eraser) {
+      eraser.disabled = editorLayer === EDITOR_LAYER_TILE;
+      eraser.title = editorLayer === EDITOR_LAYER_TILE ? "地块无法删除，只能覆盖" : "删除物件";
+    }
     root.querySelectorAll("[data-size]").forEach(button => button.classList.toggle("bms-ed-active", Number(button.dataset.size) === editorBrushSize));
     root.querySelector('[data-ed="grid"]')?.classList.toggle("bms-ed-active", editorGridVisible);
     const undo = root.querySelector('[data-ed="undo"]');
@@ -746,6 +872,22 @@
       else drawEditorPlaceholder(ctx, x, y, w, h);
     }
 
+    // 光照层：按原版绘制顺序叠加在物件之上，半透明色块填充整格
+    if (Array.isArray(editorWorking.Effects)) {
+      for (let i = 0; i < size.width * size.height; i++) {
+        const list = editorWorking.Effects[i];
+        if (!Array.isArray(list) || list.length === 0) continue;
+        const x = (i % size.width) * EDITOR_TILE_SIZE;
+        const y = Math.floor(i / size.width) * EDITOR_TILE_SIZE;
+        for (const effect of list) {
+          const color = effect?.Color;
+          if (!Array.isArray(color) || color.length < 4) continue;
+          ctx.fillStyle = `rgba(${color[0]},${color[1]},${color[2]},${color[3]})`;
+          ctx.fillRect(x, y, EDITOR_TILE_SIZE, EDITOR_TILE_SIZE);
+        }
+      }
+    }
+
     if (editorGridVisible) {
       ctx.strokeStyle = "rgba(180,210,240,.22)";
       ctx.lineWidth = 1;
@@ -791,7 +933,7 @@
     const size = getChatRoomMapViewSize();
     const cells = editorBrushCells(editorHover.x, editorHover.y, editorBrushSize, size.width, size.height);
     const erasing = editorTool === EDITOR_TOOL_ERASER;
-    const preview = !erasing && editorSelected?.layer === editorLayer ? getEditorImage(editorMaterialPath(editorSelected)) : null;
+    const preview = !erasing && editorSelected?.layer === editorLayer ? getEditorImage(editorMaterialImage(editorSelected)) : null;
     ctx.save();
     for (const cell of cells) {
       const p = editorGridToCanvasXY(cell.x, cell.y, editorView);
