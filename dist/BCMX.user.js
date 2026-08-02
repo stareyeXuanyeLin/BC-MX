@@ -913,17 +913,19 @@
     return typeof globalThis.ChatRoomMapViewIsActive === "function" && globalThis.ChatRoomMapViewIsActive() === true;
   }
 
-  // Always 房间由原版规则保证全员处于地图视图，不依赖插件标记；Hybrid 房间中，
-  // 自己读取原版实时视图状态，远端玩家读取随 MapData 同步的状态标记。
-  // 标记优先读 hook 翻译结果，再兜底读原版同步进 character.MapData 的广播镜像，
-  // 覆盖接收端 hook 未安装或对方为早期版本（标记位于 PrivateState）的情况。
+  // Always 房间由原版规则保证全员处于地图视图；Hybrid 房间中，自己读取原版实时视图，
+  // 远端玩家按三态标记判定：true=地图中，false=明确聊天中，undefined（无插件或旧版）
+  // 乐观视为地图中，对齐原版 /maptp 语义（原版传送不检查目标视图，位置会延迟生效）。
   function isCharacterMapViewActive(character) {
     if (!character) return false;
     if (getChatRoomData()?.MapData?.Type === "Always") return true;
     if (Number(character.MemberNumber) === currentMemberNumber()) return isLocalMapViewActive();
-    return character.BMSMapViewActive === true
-      || character.MapData?.BMSMapViewActive === true
-      || character.MapData?.PrivateState?.BMSMapViewActive === true;
+    if (character.BMSMapViewActive === true) return true;
+    if (character.BMSMapViewActive === false) return false;
+    // 无标记：兜底读原版同步进 MapData 的广播镜像；仍无标记则乐观视为地图中。
+    const mirror = character.MapData;
+    if (mirror?.BMSMapViewActive === true || mirror?.PrivateState?.BMSMapViewActive === true) return true;
+    return mirror?.BMSMapViewActive !== false;
   }
 
   function applyStealthMarker(character, mapData) {
@@ -934,14 +936,17 @@
 
   function applyMapViewPresenceMarker(character, mapData) {
     if (!character) return;
-    // 同时识别顶层标记（当前版本）与 PrivateState 标记（早期版本发送端）。
+    // 三态标记：true=地图中，false=明确聊天中（当前版本发送端显式广播），
+    // undefined=无插件或旧版发送端。同时识别早期版本放在 PrivateState 的标记。
     if (mapData?.BMSMapViewActive === true || mapData?.PrivateState?.BMSMapViewActive === true) character.BMSMapViewActive = true;
+    else if (mapData?.BMSMapViewActive === false) character.BMSMapViewActive = false;
     else delete character.BMSMapViewActive;
   }
 
   // 同步本地地图状态：把持久化的隐藏开关重新映射回 MapData，覆盖重登/对象重建后
   // 新 MapData 丢失 BMSHidden 标记的情况；同时维护地图视角在线标记。
-  // 标记同时写入顶层与 PrivateState，兼容不同版本接收端；任一字段变化或强制时立即广播。
+  // 视角标记显式写 true/false（而非删除），让接收端能区分“明确在聊天视图”与“无插件未上报”；
+  // 同时镜像到 PrivateState 兼容早期版本接收端。任一字段变化或强制时立即广播。
   function syncLocalMapViewPresence(force = false) {
     const player = getPlayerCharacter();
     if (!player?.MapData) return false;
@@ -953,18 +958,14 @@
     const privateState = player.MapData.PrivateState && typeof player.MapData.PrivateState === "object"
       ? player.MapData.PrivateState
       : (player.MapData.PrivateState = {});
-    const changed = (player.MapData.BMSMapViewActive === true) !== active
+    const activeField = active ? true : false;
+    const changed = player.MapData.BMSMapViewActive !== activeField
       || (privateState.BMSMapViewActive === true) !== active
       || hiddenChanged;
-    if (active) {
-      player.MapData.BMSMapViewActive = true;
-      privateState.BMSMapViewActive = true;
-    } else {
-      delete player.MapData.BMSMapViewActive;
-      delete privateState.BMSMapViewActive;
-    }
-    if (active) player.BMSMapViewActive = true;
-    else delete player.BMSMapViewActive;
+    player.MapData.BMSMapViewActive = activeField;
+    if (active) privateState.BMSMapViewActive = true;
+    else delete privateState.BMSMapViewActive;
+    player.BMSMapViewActive = activeField;
     if (!changed && !force) return true;
     const serverSend = getServerSend();
     if (typeof serverSend === "function") {

@@ -497,16 +497,21 @@ test("reachability detects enclosed areas for non-admin teleport", () => {
   assert.equal(api.isPositionReachable(grid, 4, 4, 40, 4), false);
 });
 
-test("remote players outside the map view cannot be teleported in hybrid rooms", () => {
+test("players with an explicit off-map marker cannot be teleported in hybrid rooms", () => {
   const { api, context } = createRuntime({
     ChatRoomData: { Name: "房", MapData: { Type: "Hybrid" } },
     ChatRoomMapViewTeleport: () => {},
   });
   const bob = context.ChatRoomCharacter.find(character => character.MemberNumber === 222);
-  delete bob.BMSMapViewActive;
+  // 显式标记为聊天中 → 拒绝
+  api.applyMapViewPresenceMarker(bob, { BMSMapViewActive: false });
   assert.equal(api.isCharacterMapViewActive(bob), false);
   assert.throws(() => api.teleportCharacter(222, 3, 4), /当前不在地图视角/);
-
+  // 无标记（无插件/未上报）→ 乐观视为地图中，可传送
+  delete bob.BMSMapViewActive;
+  assert.equal(api.isCharacterMapViewActive(bob), true);
+  assert.equal(api.teleportCharacter(222, 3, 4), "native");
+  // 显式标记为地图中 → 可传送
   api.applyMapViewPresenceMarker(bob, { BMSMapViewActive: true });
   assert.equal(api.isCharacterMapViewActive(bob), true);
   assert.equal(api.teleportCharacter(222, 3, 4), "native");
@@ -520,7 +525,7 @@ test("always-map rooms treat every member as map-active without plugin markers",
   assert.equal(api.teleportCharacter(222, 3, 4), "native");
 });
 
-test("hybrid-room presence is recognized from either the root or the private-state channel", () => {
+test("hybrid-room presence distinguishes explicit off-map from unknown players", () => {
   const bob = { MemberNumber: 222 };
   const { api } = createRuntime({ ChatRoomData: { Name: "房", MapData: { Type: "Hybrid" } } });
   // 早期版本发送端：标记位于 PrivateState
@@ -529,9 +534,12 @@ test("hybrid-room presence is recognized from either the root or the private-sta
   // 当前版本发送端：标记位于顶层
   api.applyMapViewPresenceMarker(bob, { BMSMapViewActive: true, PrivateState: {} });
   assert.equal(api.isCharacterMapViewActive(bob), true);
-  // 两个通道都没有 → 不在
-  api.applyMapViewPresenceMarker(bob, { PrivateState: {} });
+  // 显式标记为聊天中 → 明确不在
+  api.applyMapViewPresenceMarker(bob, { BMSMapViewActive: false, PrivateState: {} });
   assert.equal(api.isCharacterMapViewActive(bob), false);
+  // 无标记（无插件/旧版）→ 乐观视为地图中
+  api.applyMapViewPresenceMarker(bob, { PrivateState: {} });
+  assert.equal(api.isCharacterMapViewActive(bob), true);
 });
 
 test("local map view presence is broadcast only when it changes or is forced", () => {
@@ -546,7 +554,7 @@ test("local map view presence is broadcast only when it changes or is forced", (
 
   context.ChatRoomMapViewIsActive = () => false;
   api.syncLocalMapViewPresence();
-  assert.equal(context.Player.MapData.BMSMapViewActive, undefined);
+  assert.equal(context.Player.MapData.BMSMapViewActive, false); // 显式 false：接收端能区分“聊天中”与“未上报”
   assert.equal(context.Player.MapData.PrivateState.BMSMapViewActive, undefined);
   assert.equal(sent.length, 2);
   api.syncLocalMapViewPresence(true);
@@ -562,7 +570,7 @@ test("switching between character and map views broadcasts the new presence imme
     ServerSend: (type, data) => sent.push({ type, data: plain(data) }),
   });
   api.installHooksForTest(createModApi(context));
-  assert.equal(sent.length, 0);
+  sent.length = 0; // 安装时已广播一次初始状态，这里清零后只验证后续切换
 
   context.ChatRoomActivateView("Map");
   assert.equal(sent.length, 1);
@@ -572,7 +580,7 @@ test("switching between character and map views broadcasts the new presence imme
 
   context.ChatRoomActivateView("Character");
   assert.equal(sent.length, 2);
-  assert.equal(sent[1].data.BMSMapViewActive, undefined);
+  assert.equal(sent[1].data.BMSMapViewActive, false);
   assert.equal(sent[1].data.PrivateState.BMSMapViewActive, undefined);
 });
 
@@ -580,13 +588,17 @@ test("presence falls back to the broadcast mirror stored on the remote MapData",
   const { api, context } = createRuntime({ ChatRoomData: { Name: "房", MapData: { Type: "Hybrid" } } });
   const alice = context.ChatRoomCharacter.find(character => character.MemberNumber === 111);
   delete alice.BMSMapViewActive;
-  assert.equal(api.isCharacterMapViewActive(alice), false);
+  // 无标记 → 乐观视为地图中
+  assert.equal(api.isCharacterMapViewActive(alice), true);
   // 模拟接收端原版把广播 MapData（含标记）赋给角色，但插件接收 hook 未安装
   alice.MapData = { Pos: { X: 6, Y: 6 }, BMSMapViewActive: true };
   assert.equal(api.isCharacterMapViewActive(alice), true);
-  // 顶层字段移除后回到不在
-  alice.MapData = { Pos: { X: 6, Y: 6 } };
+  // 显式 false 镜像 → 明确不在
+  alice.MapData = { Pos: { X: 6, Y: 6 }, BMSMapViewActive: false };
   assert.equal(api.isCharacterMapViewActive(alice), false);
+  // 镜像字段缺失 → 乐观视为地图中
+  alice.MapData = { Pos: { X: 6, Y: 6 } };
+  assert.equal(api.isCharacterMapViewActive(alice), true);
 });
 
 test("map view presence survives a server round trip onto the remote character", () => {
