@@ -916,19 +916,10 @@
     return typeof globalThis.ChatRoomMapViewIsActive === "function" && globalThis.ChatRoomMapViewIsActive() === true;
   }
 
-  // Always 房间由原版规则保证全员处于地图视图；Hybrid 房间中，自己读取原版实时视图，
-  // 远端玩家按三态标记判定：true=地图中，false=明确聊天中，undefined（无插件或旧版）
-  // 乐观视为地图中，对齐原版 /maptp 语义（原版传送不检查目标视图，位置会延迟生效）。
+  // 视图状态检测已按用户要求屏蔽：原版传送本就不检查目标视图，因此远端玩家一律视为
+  // 可传送、可选中、可换位。保留函数签名以兼容调用点，恒返回 true。
   function isCharacterMapViewActive(character) {
-    if (!character) return false;
-    if (getChatRoomData()?.MapData?.Type === "Always") return true;
-    if (Number(character.MemberNumber) === currentMemberNumber()) return isLocalMapViewActive();
-    if (character.BMSMapViewActive === true) return true;
-    if (character.BMSMapViewActive === false) return false;
-    // 无标记：兜底读原版同步进 MapData 的广播镜像；仍无标记则乐观视为地图中。
-    const mirror = character.MapData;
-    if (mirror?.BMSMapViewActive === true || mirror?.PrivateState?.BMSMapViewActive === true) return true;
-    return mirror?.BMSMapViewActive !== false;
+    return true;
   }
 
   function applyStealthMarker(character, mapData) {
