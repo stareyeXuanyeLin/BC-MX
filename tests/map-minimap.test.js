@@ -69,6 +69,8 @@ function createRuntime(overrides = {}) {
     CurrentScreen: "ChatRoom",
     ChatRoomData: {
       Name: "测试地图房",
+      Space: "",
+      Admin: [12345],
       MapData: { Type: "Always", Tiles: String.fromCharCode(100).repeat(1600), Objects: String.fromCharCode(0).repeat(1600) },
     },
     ChatRoomCharacter: [
@@ -242,52 +244,150 @@ test("teleport itself no longer spams room update messages", () => {
   assert.equal(sent[0].data.Content, "ChatRoomMapViewTeleport");
 });
 
-test("unsynced target triggers a one-time room sync; synced target stays silent", () => {
+test("admin flip planning preserves original permissions and excludes self/admin helpers", () => {
+  const { api } = createRuntime();
+  assert.deepEqual(plain(api.chooseAdminFlipPlan(222, [12345], [{ MemberNumber: 222 }], 12345)), {
+    memberNumber: 222,
+    firstAction: "Promote",
+    restoreAction: "Demote",
+    expectedFinalAdmin: false,
+    mode: "admin-flip",
+  });
+  assert.deepEqual(plain(api.chooseAdminFlipPlan(222, [12345, 222, 333], [
+    { MemberNumber: 12345 },
+    { MemberNumber: 333 },
+    { MemberNumber: 111 },
+  ], 12345)), {
+    memberNumber: 111,
+    firstAction: "Promote",
+    restoreAction: "Demote",
+    expectedFinalAdmin: false,
+    mode: "helper-flip",
+  });
+  assert.deepEqual(plain(api.chooseAdminFlipPlan(222, [12345, 222], [{ MemberNumber: 222 }], 12345)), {
+    memberNumber: 222,
+    firstAction: "Demote",
+    restoreAction: "Promote",
+    expectedFinalAdmin: true,
+    mode: "admin-restore-flip",
+  });
+  assert.equal(api.chooseAdminFlipPlan(12345, [12345], [], 12345), null);
+});
+
+test("unsynced ordinary target uses silent Promote then Demote; synced target stays silent", () => {
   const sent = [];
+  const timers = [];
   const { api, context } = createRuntime({
     ServerSend: (type, data) => sent.push({ type, data }),
-    ChatRoomGetSettings: room => ({ Name: room.Name, MapData: { ...room.MapData } }),
+    setTimeout: callback => { timers.push(callback); return timers.length; },
   });
   const bob = context.ChatRoomCharacter.find(character => character.MemberNumber === 222);
-  // 目标位置已同步（本地视角已是新位置）→ 不触发任何房间更新
   bob.MapData.Pos = { X: 3, Y: 4 };
   assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), false);
   assert.equal(sent.length, 0);
-  // 目标位置未同步（无插件聊天视图，广播未到）→ 触发一次 fog flip（两次 Update）
+
   bob.MapData.Pos = { X: 10, Y: 10 };
+  const originalMapData = plain(context.ChatRoomData.MapData);
   assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), true);
+  assert.deepEqual(plain(sent), [
+    { type: "ChatRoomAdmin", data: { MemberNumber: 222, Action: "Promote", Publish: false } },
+    { type: "ChatRoomAdmin", data: { MemberNumber: 222, Action: "Demote", Publish: false } },
+  ]);
+  assert.equal(sent.some(message => message.data.Action === "Update"), false);
+  assert.deepEqual(plain(context.ChatRoomData.MapData), originalMapData);
+
+  timers[0](); // Admin 最终状态已恢复，不发送补偿包
   assert.equal(sent.length, 2);
-  assert.equal(sent[0].type, "ChatRoomAdmin");
-  assert.equal(sent[1].type, "ChatRoomAdmin");
 });
 
-test("room sync sends Player.ID so the server accepts admin updates", () => {
+test("admin target uses a non-admin helper and never Promote→Demote on the admin target", () => {
   const sent = [];
   const { api } = createRuntime({
-    Player: { MemberNumber: 12345, ID: 0, MapData: { Pos: { X: 20, Y: 20 } } },
+    ChatRoomData: {
+      Name: "房",
+      Space: "",
+      Admin: [12345, 222, 333],
+      MapData: { Type: "Always", Tiles: "t", Objects: "o" },
+    },
     ServerSend: (type, data) => sent.push({ type, data }),
-    ChatRoomGetSettings: room => ({ Name: room.Name, MapData: { ...room.MapData } }),
+    setTimeout: () => 1,
   });
-  assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), true); // Bob 位置 (10,10) ≠ (3,4)，触发同步
-  const update = sent.find(message => message.type === "ChatRoomAdmin");
-  assert.ok(update);
-  // 必须传 Player.ID（0）而非自己的 MemberNumber（12345）：
-  // 服务器对“管理员对自己执行 Update”直接拒绝，全房间属性广播不会发生。
-  assert.equal(update.data.MemberNumber, 0);
-  assert.notEqual(update.data.MemberNumber, 12345);
+  assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), true);
+  assert.deepEqual(plain(sent.map(message => message.data)), [
+    { MemberNumber: 111, Action: "Promote", Publish: false },
+    { MemberNumber: 111, Action: "Demote", Publish: false },
+  ]);
 });
 
-test("fog flip restores an explicitly disabled fog to disabled", () => {
+test("admin target without a helper uses Demote then Promote to restore its original role", () => {
   const sent = [];
+  const { api } = createRuntime({
+    ChatRoomData: {
+      Name: "房",
+      Space: "",
+      Admin: [12345, 222, 111, 333],
+      MapData: { Type: "Always", Tiles: "t", Objects: "o" },
+    },
+    ServerSend: (type, data) => sent.push({ type, data }),
+    setTimeout: () => 1,
+  });
+  assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), true);
+  assert.deepEqual(plain(sent.map(message => message.data)), [
+    { MemberNumber: 222, Action: "Demote", Publish: false },
+    { MemberNumber: 222, Action: "Promote", Publish: false },
+  ]);
+});
+
+test("recovery check repairs a residual temporary admin role exactly once", () => {
+  const sent = [];
+  const timers = [];
   const { api, context } = createRuntime({
     ServerSend: (type, data) => sent.push({ type, data }),
-    ChatRoomGetSettings: room => ({ Name: room.Name, MapData: { ...room.MapData } }),
-    ChatRoomData: { Name: "房", MapData: { Type: "Always", Fog: false, Tiles: "t", Objects: "o" } },
+    setTimeout: callback => { timers.push(callback); return timers.length; },
   });
-  api.forceSyncUnsyncedTarget(222, 3, 4);
-  assert.equal(sent[0].data.Room.MapData.Fog, undefined); // 第一次翻转为启用
-  assert.equal(sent[1].data.Room.MapData.Fog, false); // 恢复为关闭
-  assert.equal(context.ChatRoomData.MapData.Fog, false);
+  assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), true);
+  context.ChatRoomData.Admin.push(222); // 模拟首次 Demote 丢失
+  timers[0]();
+  assert.equal(sent.length, 3);
+  assert.deepEqual(plain(sent[2]), {
+    type: "ChatRoomAdmin",
+    data: { MemberNumber: 222, Action: "Demote", Publish: false },
+  });
+});
+
+test("recovery check aborts after room/admin/character context becomes invalid", () => {
+  for (const invalidate of [
+    context => { context.ChatRoomData.Name = "另一个房间"; },
+    context => { context.ChatRoomPlayerIsAdmin = () => false; },
+    context => { context.ChatRoomCharacter = context.ChatRoomCharacter.filter(character => character.MemberNumber !== 222); },
+  ]) {
+    const sent = [];
+    const timers = [];
+    const { api, context } = createRuntime({
+      ServerSend: (type, data) => sent.push({ type, data }),
+      setTimeout: callback => { timers.push(callback); return timers.length; },
+    });
+    api.forceSyncUnsyncedTarget(222, 3, 4);
+    context.ChatRoomData.Admin.push(222);
+    invalidate(context);
+    timers[0]();
+    assert.equal(sent.length, 2);
+  }
+});
+
+test("a second silent flip cannot start until the first recovery check finishes", () => {
+  const sent = [];
+  const timers = [];
+  const { api } = createRuntime({
+    ServerSend: (type, data) => sent.push({ type, data }),
+    setTimeout: callback => { timers.push(callback); return timers.length; },
+  });
+  assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), true);
+  assert.equal(api.forceSyncUnsyncedTarget(111, 3, 4), false);
+  assert.equal(sent.length, 2);
+  timers[0]();
+  assert.equal(api.forceSyncUnsyncedTarget(111, 3, 4), true);
+  assert.equal(sent.length, 4);
 });
 
 test("native teleport stays silent until the target is verified unsynced", () => {
@@ -295,16 +395,14 @@ test("native teleport stays silent until the target is verified unsynced", () =>
   const nativeCalls = [];
   const { api } = createRuntime({
     ServerSend: (type, data) => sent.push({ type, data }),
-    ChatRoomGetSettings: room => ({ Name: room.Name, MapData: room.MapData }),
     ChatRoomMapViewTeleport: (target, position) => nativeCalls.push({ target, position }),
+    setTimeout: () => 1,
   });
   api.teleportCharacter(222, 7, 9);
   assert.equal(nativeCalls.length, 1);
-  assert.equal(sent.length, 0); // 传送本身不发房间更新
-  api.forceSyncUnsyncedTarget(222, 7, 9); // 目标未同步 → 按需触发
-  assert.equal(sent.length, 2);
-  assert.equal(sent[0].type, "ChatRoomAdmin");
-  assert.equal(sent[1].type, "ChatRoomAdmin");
+  assert.equal(sent.length, 0);
+  api.forceSyncUnsyncedTarget(222, 7, 9);
+  assert.deepEqual(plain(sent.map(message => message.data.Action)), ["Promote", "Demote"]);
 });
 
 test("fallback teleport of self applies the position locally and sends the message", () => {

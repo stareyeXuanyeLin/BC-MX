@@ -722,19 +722,15 @@
     return globalThis.ChatRoomGetSettings ?? null;
   }
 
-  // 触发房间属性同步：服务器对无变化的 ChatRoomAdmin Update 可能去重，因此先让
-  // 房间迷雾产生一次真实变化（必然广播 ChatRoomSyncRoomProperties），再立即恢复原状
-  // （再次广播）。各客户端在 ChatRoomSyncRoomProperties 处理流程中调用
-  // ChatRoomMapViewInitializeCharacter(Player)，该函数无条件广播自己的当前 MapData。
-  // 传送消息先于本调用发出（同一 socket FIFO 保证顺序），目标客户端执行初始化时
-  // MapData 已是新位置，从而在目标处于任何视图时都立即向全房间同步新位置。
-  // 两次广播的迷雾中间态持续约一个 RTT，最终房间状态完全恢复。
+  // 旧版 fog flip 回退：服务器对无变化的 ChatRoomAdmin Update 可能去重，因此先让
+  // 房间迷雾产生一次真实变化，再立即恢复原状。默认传送同步不再走此路径；保留它只为
+  // Admin 列表缺失或无法制定安全权限翻转计划的兼容场景，便于双账号实测期间快速回滚。
   function triggerRoomPropertiesSync() {
     const serverSend = getServerSend();
     const getSettings = getChatRoomGetSettings();
     const player = getPlayerCharacter();
     const room = getChatRoomData();
-    if (!serverSend || !getSettings || !player || !room?.MapData) return;
+    if (!serverSend || !getSettings || !player || !room?.MapData) return false;
     const mapData = room.MapData;
     const fogWasEnabled = mapData.Fog !== false;
     const applyFog = enabled => {
@@ -744,22 +740,111 @@
     const sendUpdate = () => {
       serverSend("ChatRoomAdmin", {
         // 对齐原版：MemberNumber 传 Player.ID（客户端角色索引，登录后为 0）。
-        // 服务器用 MemberNumber 判断“管理员操作自己”，传自己的 MemberNumber 会被直接拒绝，
-        // Update 与全房间属性广播都不会发生；传 0 则永远不会与任何账号匹配，Update 正常通过。
+        // 服务器用 MemberNumber 判断“管理员操作自己”，传自己的 MemberNumber 会被直接拒绝。
         MemberNumber: typeof player.ID === "number" ? player.ID : player.MemberNumber,
         Room: getSettings(room),
         Action: "Update",
       });
     };
     try {
-      applyFog(!fogWasEnabled); // 第一次：真实变化，服务器必然广播
+      applyFog(!fogWasEnabled);
       sendUpdate();
-      applyFog(fogWasEnabled); // 恢复原状
+      applyFog(fogWasEnabled);
       sendUpdate();
+      return true;
     } catch (error) {
       warn("触发房间属性同步失败", error);
       applyFog(fogWasEnabled);
+      return false;
     }
+  }
+
+  const SILENT_ADMIN_FLIP_RECOVERY_DELAY_MS = 1500;
+  let silentAdminFlipInProgress = false;
+
+  // 纯逻辑规划：普通目标直接 Promote→Demote；目标原本是管理员时优先借用另一名
+  // 普通成员，房间内没有 helper 才对目标执行 Demote→Promote。永不对当前玩家执行
+  // Promote/Demote，因为 BC 服务端会拒绝管理员对自己的这类管理动作。
+  function chooseAdminFlipPlan(targetMemberNumber, roomAdminList, roomCharacters, selfMemberNumber) {
+    const target = Number(targetMemberNumber);
+    const self = Number(selfMemberNumber);
+    if (!Number.isInteger(target) || !Number.isInteger(self) || !Array.isArray(roomAdminList)) return null;
+    const admins = new Set(roomAdminList.map(Number).filter(Number.isInteger));
+    if (!admins.has(target)) {
+      if (target === self) return null;
+      return { memberNumber: target, firstAction: "Promote", restoreAction: "Demote", expectedFinalAdmin: false, mode: "admin-flip" };
+    }
+    const helper = (Array.isArray(roomCharacters) ? roomCharacters : []).find(character => {
+      const member = Number(character?.MemberNumber);
+      return Number.isInteger(member) && member !== self && member !== target && !admins.has(member);
+    });
+    if (helper) {
+      return { memberNumber: Number(helper.MemberNumber), firstAction: "Promote", restoreAction: "Demote", expectedFinalAdmin: false, mode: "helper-flip" };
+    }
+    if (target === self) return null;
+    return { memberNumber: target, firstAction: "Demote", restoreAction: "Promote", expectedFinalAdmin: true, mode: "admin-restore-flip" };
+  }
+
+  function roomIdentity(room) {
+    if (!room) return "";
+    return `${String(room.Space ?? "")}|${String(room.Name ?? "")}`;
+  }
+
+  // 制造一次静默房间属性变化。Promote/Demote 均支持 Publish:false；服务端同步 Admin
+  // 列表时，各客户端会重新初始化并广播自己的 MapData，从而让聊天视图目标的新位置生效。
+  // 两包背靠背发送，随后只做一次最终权限状态补偿，不扩展为持久事务或 watchdog。
+  function triggerSilentMapDataRefresh(preferredMemberNumber) {
+    if (silentAdminFlipInProgress) return false;
+    const serverSend = getServerSend();
+    const room = getChatRoomData();
+    const selfMemberNumber = currentMemberNumber();
+    if (!serverSend || !room || !isRoomAdmin()) return false;
+    const plan = chooseAdminFlipPlan(preferredMemberNumber, room.Admin, getChatRoomCharacterList(), selfMemberNumber);
+    if (!plan) return triggerRoomPropertiesSync() ? "fallback" : false;
+
+    const originalRoomIdentity = roomIdentity(room);
+    let firstActionSent = false;
+    silentAdminFlipInProgress = true;
+    try {
+      serverSend("ChatRoomAdmin", {
+        MemberNumber: plan.memberNumber,
+        Action: plan.firstAction,
+        Publish: false,
+      });
+      firstActionSent = true;
+      serverSend("ChatRoomAdmin", {
+        MemberNumber: plan.memberNumber,
+        Action: plan.restoreAction,
+        Publish: false,
+      });
+    } catch (error) {
+      warn("静默管理员权限翻转失败", error);
+      if (!firstActionSent) {
+        silentAdminFlipInProgress = false;
+        return false;
+      }
+    }
+
+    setTimeout(() => {
+      try {
+        const currentRoom = getChatRoomData();
+        if (globalThis.CurrentScreen !== "ChatRoom" || roomIdentity(currentRoom) !== originalRoomIdentity) return;
+        if (!isRoomAdmin() || !findRoomCharacter(plan.memberNumber)) return;
+        const isCurrentlyAdmin = Array.isArray(currentRoom?.Admin)
+          && currentRoom.Admin.map(Number).includes(plan.memberNumber);
+        if (isCurrentlyAdmin === plan.expectedFinalAdmin) return;
+        serverSend("ChatRoomAdmin", {
+          MemberNumber: plan.memberNumber,
+          Action: plan.restoreAction,
+          Publish: false,
+        });
+      } catch (error) {
+        warn("静默管理员权限恢复检查失败", error);
+      } finally {
+        silentAdminFlipInProgress = false;
+      }
+    }, SILENT_ADMIN_FLIP_RECOVERY_DELAY_MS);
+    return plan.mode;
   }
 
   function getServerSend() {
@@ -854,16 +939,15 @@
     return "fallback";
   }
 
-  // 传送后的按需同步：目标位置尚未广播回本地视角（无插件且处于聊天视图）时，
-  // 触发一次全房间属性同步，强制所有客户端重广播自己的 MapData，让目标新位置立即生效。
-  // 已同步则零打扰（不发任何房间更新消息）。返回是否触发了同步。
+  // 传送后的按需同步：目标位置尚未广播回本地视角时，默认通过静默权限翻转触发
+  // ChatRoomSyncRoomProperties，强制所有客户端重广播 MapData。已同步、事务占用或环境
+  // 已失效时保持零打扰。返回是否成功启动了同步动作。
   function forceSyncUnsyncedTarget(memberNumber, x, y) {
     const target = findRoomCharacter(memberNumber);
     if (!target) return false;
     const pos = target.MapData?.Pos;
     if (pos?.X === Number(x) && pos?.Y === Number(y)) return false;
-    triggerRoomPropertiesSync();
-    return true;
+    return !!triggerSilentMapDataRefresh(memberNumber);
   }
 
   // ===== 小地图状态同步 =====
@@ -3653,6 +3737,8 @@
       syncLocalMapViewPresence,
       installStealthHooks,
       teleportVerificationMessage,
+      chooseAdminFlipPlan,
+      triggerSilentMapDataRefresh,
       forceSyncUnsyncedTarget,
       isTeleportMessageFor,
       buildSwapTeleportPlan,
