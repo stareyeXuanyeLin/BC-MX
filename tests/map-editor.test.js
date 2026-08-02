@@ -83,16 +83,27 @@ test("editor viewport coordinates round-trip with shared pan and zoom math", () 
   assert.equal(api.editorCanvasToGridXY(-9999, -9999, view, size), null);
 });
 
-test("brush size is an exact 1x1 through 5x5 square anchored at the pointer cell", () => {
+test("brush size is an exact 1x1 through 5x5 square centered on the pointer cell", () => {
   const { api } = createRuntime();
   assert.deepEqual(plain(api.editorBrushCells(10, 10, 1, 40, 40)), [{ x: 10, y: 10, index: 410 }]);
+  // 偶数尺寸无整数中心，鼠标格落在中心偏左上半格（2×2 时仍为左上格）
   assert.deepEqual(plain(api.editorBrushCells(10, 10, 2, 40, 40)), [
     { x: 10, y: 10, index: 410 }, { x: 11, y: 10, index: 411 },
     { x: 10, y: 11, index: 450 }, { x: 11, y: 11, index: 451 },
   ]);
-  assert.equal(api.editorBrushCells(10, 10, 3, 40, 40).length, 9);
+  // 奇数尺寸鼠标格为正中心
+  assert.deepEqual(plain(api.editorBrushCells(10, 10, 3, 40, 40)).map(c => [c.x, c.y]), [
+    [9, 9], [10, 9], [11, 9], [9, 10], [10, 10], [11, 10], [9, 11], [10, 11], [11, 11],
+  ]);
+  assert.deepEqual(plain(api.editorBrushCells(10, 10, 4, 40, 40)).map(c => [c.x, c.y]), [
+    [9, 9], [10, 9], [11, 9], [12, 9], [9, 10], [10, 10], [11, 10], [12, 10],
+    [9, 11], [10, 11], [11, 11], [12, 11], [9, 12], [10, 12], [11, 12], [12, 12],
+  ]);
+  assert.deepEqual(plain(api.editorBrushCells(10, 10, 5, 40, 40)).map(c => [c.x, c.y])[0], [8, 8]);
   assert.equal(api.editorBrushCells(10, 10, 5, 40, 40).length, 25);
-  assert.equal(api.editorBrushCells(39, 39, 5, 40, 40).length, 1);
+  // 边界裁剪：39 格处的 5×5 只剩 3×3
+  assert.equal(api.editorBrushCells(39, 39, 5, 40, 40).length, 9);
+  assert.deepEqual(plain(api.editorBrushCells(0, 0, 5, 40, 40)).map(c => [c.x, c.y])[0], [0, 0]);
 });
 
 test("tile and object brush writes use UTF-16 map strings", () => {

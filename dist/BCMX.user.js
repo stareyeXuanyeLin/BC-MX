@@ -2285,9 +2285,11 @@
   function editorBrushCells(cx, cy, range, width, height) {
     const cells = [];
     const side = Math.max(1, Math.min(5, Math.floor(Number(range) || 1)));
-    // 指针格固定为左上角，画笔数字严格对应 N×N；偶数尺寸不再产生方向歧义。
-    for (let y = cy; y < cy + side; y++) {
-      for (let x = cx; x < cx + side; x++) {
+    // 笔刷以鼠标格为中心：奇数尺寸鼠标格为正中心；偶数尺寸无整数中心，鼠标落在中心偏左上半格。
+    const startX = cx - Math.floor((side - 1) / 2);
+    const startY = cy - Math.floor((side - 1) / 2);
+    for (let y = startY; y < startY + side; y++) {
+      for (let x = startX; x < startX + side; x++) {
         if (x >= 0 && y >= 0 && x < width && y < height) cells.push({ x, y, index: y * width + x });
       }
     }
