@@ -888,7 +888,6 @@
     }
     const target = findRoomCharacter(memberNumber);
     if (!target) throw new Error("找不到目标玩家");
-    if (!isCharacterMapViewActive(target)) throw new Error("目标玩家当前不在地图视角，无法传送");
     const position = { X: tx, Y: ty };
 
     if (!admin) {
@@ -926,8 +925,8 @@
   }
 
   // ===== 小地图状态同步 =====
-  // 坐标隐藏与地图视角状态都放在 MapData 顶层，随正常 MapData 广播流转；同时镜像到
-  // PrivateState 兼容早期版本接收端。接收端只在插件侧维护角色状态，原版渲染不读取这些标记。
+  // 坐标隐藏标记放在 MapData 顶层，随正常 MapData 广播流转。接收端只在插件侧维护
+  // 角色隐藏状态，原版渲染不读取该标记。
 
   // 隐藏状态存储键沿用历史前缀（BC.MapSaver.stealth），已开启隐藏的用户升级后状态保留。
   const STEALTH_STORAGE_PREFIX = "BC.MapSaver.stealth";
@@ -977,6 +976,7 @@
     return character.BMSHidden === true || character.MapData?.BMSHidden === true;
   }
 
+  // 本地地图视图检查：地图编辑器等 UI 要求玩家处于地图视图才能操作。
   function isLocalMapViewActive() {
     if (globalThis.CurrentScreen !== "ChatRoom") return false;
     try {
@@ -985,57 +985,28 @@
     return typeof globalThis.ChatRoomMapViewIsActive === "function" && globalThis.ChatRoomMapViewIsActive() === true;
   }
 
-  // 视图状态检测已按用户要求屏蔽：原版传送本就不检查目标视图，因此远端玩家一律视为
-  // 可传送、可选中、可换位。保留函数签名以兼容调用点，恒返回 true。
-  function isCharacterMapViewActive(character) {
-    return true;
-  }
-
   function applyStealthMarker(character, mapData) {
     if (!character) return;
     if (mapData?.BMSHidden === true) character.BMSHidden = true;
     else delete character.BMSHidden;
   }
 
-  function applyMapViewPresenceMarker(character, mapData) {
-    if (!character) return;
-    // 三态标记：true=地图中，false=明确聊天中（当前版本发送端显式广播），
-    // undefined=无插件或旧版发送端。同时识别早期版本放在 PrivateState 的标记。
-    if (mapData?.BMSMapViewActive === true || mapData?.PrivateState?.BMSMapViewActive === true) character.BMSMapViewActive = true;
-    else if (mapData?.BMSMapViewActive === false) character.BMSMapViewActive = false;
-    else delete character.BMSMapViewActive;
-  }
-
-  // 同步本地地图状态：把持久化的隐藏开关重新映射回 MapData，覆盖重登/对象重建后
-  // 新 MapData 丢失 BMSHidden 标记的情况；同时维护地图视角在线标记。
-  // 视角标记显式写 true/false（而非删除），让接收端能区分“明确在聊天视图”与“无插件未上报”；
-  // 同时镜像到 PrivateState 兼容早期版本接收端。任一字段变化或强制时立即广播。
-  function syncLocalMapViewPresence(force = false) {
+  // 同步本地坐标隐藏状态：把持久化的隐藏开关重新映射回 MapData，覆盖重登/对象重建后
+  // 新 MapData 丢失 BMSHidden 标记的情况。状态变化或强制时立即广播。
+  function syncLocalMapState(force = false) {
     const player = getPlayerCharacter();
     if (!player?.MapData) return false;
     const hidden = isStealthEnabled();
     const hiddenChanged = (player.MapData.BMSHidden === true) !== hidden;
     if (hidden) player.MapData.BMSHidden = true;
     else delete player.MapData.BMSHidden;
-    const active = isLocalMapViewActive();
-    const privateState = player.MapData.PrivateState && typeof player.MapData.PrivateState === "object"
-      ? player.MapData.PrivateState
-      : (player.MapData.PrivateState = {});
-    const activeField = active ? true : false;
-    const changed = player.MapData.BMSMapViewActive !== activeField
-      || (privateState.BMSMapViewActive === true) !== active
-      || hiddenChanged;
-    player.MapData.BMSMapViewActive = activeField;
-    if (active) privateState.BMSMapViewActive = true;
-    else delete privateState.BMSMapViewActive;
-    player.BMSMapViewActive = activeField;
-    if (!changed && !force) return true;
+    if (!hiddenChanged && !force) return true;
     const serverSend = getServerSend();
     if (typeof serverSend === "function") {
       try {
         serverSend("ChatRoomCharacterMapDataUpdate", player.MapData);
       } catch (error) {
-        warn("广播地图视角状态失败", error);
+        warn("广播坐标隐藏状态失败", error);
       }
     }
     return true;
@@ -1050,7 +1021,6 @@
     const character = findRoomCharacter(characterData.MemberNumber);
     if (!character || character === getPlayerCharacter()) return;
     applyStealthMarker(character, characterData.MapData);
-    applyMapViewPresenceMarker(character, characterData.MapData);
   }
 
   function installStealthHooks() {
@@ -1063,7 +1033,6 @@
             const character = findRoomCharacter(data.MemberNumber);
             if (character && character !== getPlayerCharacter()) {
               applyStealthMarker(character, data.MapData);
-              applyMapViewPresenceMarker(character, data.MapData);
             }
           }
         } catch (error) {
@@ -1084,31 +1053,22 @@
         return result;
       });
     }
-    // 本地切换聊天/地图视角后立即广播状态。ChatRoomActivateView 是统一切换入口，
-    // 比直接 Hook MapView.Activate/Deactivate 更可靠，因为原版视图表持有的是早期函数引用。
-    if (typeof globalThis.ChatRoomActivateView === "function") {
-      modApi.hookFunction("ChatRoomActivateView", 1000, (args, next) => {
-        const result = next(args);
-        try { syncLocalMapViewPresence(); } catch (error) { warn("同步地图视角切换失败", error); }
-        return result;
-      });
-    }
     // 有新成员加入时主动重广播一次当前标记，弥补服务器初始角色同步可能净化扩展字段的问题。
     if (typeof globalThis.ChatRoomSyncMemberJoin === "function") {
       modApi.hookFunction("ChatRoomSyncMemberJoin", 1000, (args, next) => {
         const result = next(args);
         try {
-          if (!isStealthEnabled() && !isLocalMapViewActive()) return result;
+          if (!isStealthEnabled()) return result;
           setTimeout(() => {
-            try { syncLocalMapViewPresence(true); } catch (error) { warn("进房后重广播小地图状态失败", error); }
+            try { syncLocalMapState(true); } catch (error) { warn("进房后重广播坐标隐藏状态失败", error); }
           }, 400);
         } catch (error) {
-          warn("进房重广播小地图状态失败", error);
+          warn("进房重广播坐标隐藏状态失败", error);
         }
         return result;
       });
     }
-    syncLocalMapViewPresence();
+    syncLocalMapState();
   }
 
 
@@ -1204,7 +1164,6 @@
       #${MINIMAP_ID} .bms-mm-pos{font-size:12px;color:#8fb3d8;font-family:Consolas,monospace}
       #${MINIMAP_ID} .bms-mm-me{font-size:11px;color:#ffd94d;border:1px solid #806a41;border-radius:999px;padding:0 6px}
       #${MINIMAP_ID} .bms-mm-hidden{font-size:11px;color:#ff9d9d;border:1px solid #7a4a26;border-radius:999px;padding:0 6px;flex:none}
-      #${MINIMAP_ID} .bms-mm-offmap{font-size:11px;color:#b7c2d0;border:1px solid #536276;border-radius:999px;padding:0 6px;flex:none}
       #${MINIMAP_ID} .bms-mm-stealth{display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid #2c425d;font-size:12px;color:#9eb4ce;cursor:pointer;user-select:none;flex:none}
       #${MINIMAP_ID} .bms-mm-stealth input{display:none}
       #${MINIMAP_ID} .bms-mm-slider{position:relative;width:36px;height:19px;border-radius:999px;background:#2a3d57;border:1px solid #45678f;transition:background .15s;flex:none}
@@ -1430,7 +1389,7 @@
     const list = getRoomCharacterList();
     return list
       .filter(c => !isCharacterHidden(c))
-      .map(c => `${c.MemberNumber}:${c.MapData.Pos.X},${c.MapData.Pos.Y}:${isCharacterMapViewActive(c) ? 1 : 0}`).sort().join("|");
+      .map(c => `${c.MemberNumber}:${c.MapData.Pos.X},${c.MapData.Pos.Y}`).sort().join("|");
   }
 
   function findRoomCharacterAt(gx, gy) {
@@ -1548,21 +1507,15 @@
       const isSelected = minimapSelected === character.MemberNumber;
       const name = character.Name ? String(character.Name) : `#${character.MemberNumber}`;
       const hidden = !isMe && isCharacterHidden(character);
-      const mapActive = isCharacterMapViewActive(character);
-      const unavailable = hidden || !mapActive;
       const title = hidden
         ? "该玩家已隐藏坐标"
-        : !mapActive
-          ? "该玩家当前不在地图视角，不能选中、传送或交换位置"
-          : admin ? "点击选中后传送" : "";
-      return `<li data-member="${character.MemberNumber}" class="${isSelected ? "bms-mm-selected" : ""}${unavailable ? " bms-mm-unavailable" : ""}" title="${title}">
+        : admin ? "点击选中后传送" : "";
+      return `<li data-member="${character.MemberNumber}" class="${isSelected ? "bms-mm-selected" : ""}${hidden ? " bms-mm-unavailable" : ""}" title="${title}">
         <span class="bms-mm-dot" style="background:${isMe ? "#f5f9ff" : minimapPlayerColor(character)}"></span>
         <span class="bms-mm-name">${escapeHTML(name)}</span>
         ${hidden
           ? '<span class="bms-mm-hidden">🙈 隐藏中</span>'
-          : !mapActive
-            ? '<span class="bms-mm-offmap">聊天中</span>'
-            : `<span class="bms-mm-pos">(${pos?.X ?? "-"}, ${pos?.Y ?? "-"})</span>`}
+          : `<span class="bms-mm-pos">(${pos?.X ?? "-"}, ${pos?.Y ?? "-"})</span>`}
         ${isMe ? '<span class="bms-mm-me">我</span>' : ""}
       </li>`;
     }).join("") || '<li style="cursor:default;color:#7d93ad">房间内没有玩家</li>';
@@ -1577,10 +1530,6 @@
     if (!target) return;
     if (isCharacterHidden(target)) {
       toast("该玩家已隐藏坐标，无法选中或传送", "error");
-      return;
-    }
-    if (!isCharacterMapViewActive(target)) {
-      toast("该玩家当前不在地图视角，无法选中、传送或交换位置", "error");
       return;
     }
     minimapSelected = memberNumber;
@@ -1770,10 +1719,6 @@
       toast("目标玩家已不在房间", "error");
       return;
     }
-    if (!isCharacterMapViewActive(a) || !isCharacterMapViewActive(b)) {
-      toast("只有当前处于地图视角的玩家才能交换位置", "error");
-      return;
-    }
     const grid = minimapGrid ?? buildMapGridSnapshot();
     const plan = buildSwapTeleportPlan(a, b, grid, getRoomCharacterList());
     if (!plan) {
@@ -1932,8 +1877,8 @@
     if (minimapSwapInProgress || minimapSelected == null || !minimapGrid) return;
     const admin = isRoomAdmin();
     const selected = findRoomCharacter(minimapSelected);
-    if (!selected || !isCharacterMapViewActive(selected)) {
-      minimapSelected = currentMemberNumber(); // 目标离开房间/地图视角：兜底选回自己
+    if (!selected) {
+      minimapSelected = currentMemberNumber(); // 目标离开房间：兜底选回自己
       minimapPending = null;
       renderMinimapStatus();
       renderMinimapRoster();
@@ -1959,10 +1904,6 @@
       if (character.MemberNumber === minimapSelected) return;
       if (!admin) {
         toast("只有房间管理员才能交换玩家位置", "error");
-        return;
-      }
-      if (!isCharacterMapViewActive(character)) {
-        toast("该玩家当前不在地图视角，无法交换位置", "error");
         return;
       }
       minimapPending = {
@@ -2014,8 +1955,8 @@
     if (sig !== minimapPlayerSig) {
       minimapPlayerSig = sig;
       const selected = minimapSelected != null ? findRoomCharacter(minimapSelected) : null;
-      if (!selected || isCharacterHidden(selected) || !isCharacterMapViewActive(selected)) {
-        minimapSelected = currentMemberNumber(); // 隐藏、离开地图视角或失效：兜底选回自己
+      if (!selected || isCharacterHidden(selected)) {
+        minimapSelected = currentMemberNumber(); // 隐藏或离开房间：兜底选回自己
         minimapPending = null;
       }
       if (!minimapSwapInProgress) renderMinimapRoster();
@@ -2056,21 +1997,11 @@
     else openMinimap();
   }
 
-  let lastPresenceSyncAt = 0;
   function installMinimapHooks() {
     if (typeof document === "undefined") return; // 简化地图依赖 DOM，无 DOM 环境（测试沙箱）不安装
     installTeleportReceiveBoost();
     modApi.hookFunction("ChatRoomRun", 0, (args, next) => {
       const result = next(args);
-      // 发送端兜底：即使视图切换 hook 未触发，也在房间运行循环中定期同步地图视角状态
-      // （幂等，仅状态变化时广播），保证跨设备接收端能拿到标记。
-      if (globalThis.CurrentScreen === "ChatRoom" && isMapRoom()) {
-        const now = Date.now();
-        if (now - lastPresenceSyncAt >= 1000) {
-          lastPresenceSyncAt = now;
-          try { syncLocalMapViewPresence(); } catch (error) { warn("定期同步地图视角状态失败", error); }
-        }
-      }
       if (shouldShowMinimap()) {
         if (minimapOpen) minimapTick();
         if (shouldDrawMinimapEntryButton() && typeof globalThis.DrawButton === "function") {
@@ -2102,7 +2033,7 @@
         minimapDirty = true;
         minimapPlayerSig = ""; // 同步可能替换角色数据对象，强制下个 tick 重建名单
         const selected = minimapSelected != null ? findRoomCharacter(minimapSelected) : null;
-        if (!selected || isCharacterHidden(selected) || !isCharacterMapViewActive(selected)) minimapSelected = currentMemberNumber(); // 仅在原选中不可操作时兜底回自己
+        if (!selected || isCharacterHidden(selected)) minimapSelected = currentMemberNumber(); // 仅在原选中不可操作时兜底回自己
         minimapPending = null;
         minimapFitted = false; // 地图可能更换：重新适配视图
         return result;
@@ -3706,10 +3637,7 @@
       setStealthEnabled,
       isCharacterHidden,
       isLocalMapViewActive,
-      isCharacterMapViewActive,
       applyStealthMarker,
-      applyMapViewPresenceMarker,
-      syncLocalMapViewPresence,
       installStealthHooks,
       teleportVerificationMessage,
       triggerSilentMapDataRefresh,
