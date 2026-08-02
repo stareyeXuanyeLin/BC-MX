@@ -413,8 +413,8 @@
   }
 
   // ===== 小地图状态同步 =====
-  // 坐标隐藏与地图视角状态都放在 MapData 顶层，随正常 MapData 广播流转。
-  // 接收端仅在插件侧维护角色状态，原版渲染不读取这些标记。
+  // 坐标隐藏与地图视角状态都放在 MapData 顶层，随正常 MapData 广播流转；同时镜像到
+  // PrivateState 兼容早期版本接收端。接收端只在插件侧维护角色状态，原版渲染不读取这些标记。
 
   // 隐藏状态存储键沿用历史前缀（BC.MapSaver.stealth），已开启隐藏的用户升级后状态保留。
   const STEALTH_STORAGE_PREFIX = "BC.MapSaver.stealth";
@@ -457,11 +457,11 @@
     return true;
   }
 
-  // 插件视角下该玩家是否隐藏：自己永远可见；他人看 BMSHidden 标记。
+  // 插件视角下该玩家是否隐藏：自己永远可见；他人看 BMSHidden 标记（含原版同步进 MapData 的镜像）。
   function isCharacterHidden(character) {
     if (!character) return false;
     if (Number(character.MemberNumber) === currentMemberNumber()) return false;
-    return character.BMSHidden === true;
+    return character.BMSHidden === true || character.MapData?.BMSHidden === true;
   }
 
   function isLocalMapViewActive() {
@@ -473,12 +473,16 @@
   }
 
   // Always 房间由原版规则保证全员处于地图视图，不依赖插件标记；Hybrid 房间中，
-  // 自己读取原版实时视图状态，远端玩家读取插件随 MapData 同步的状态标记。
+  // 自己读取原版实时视图状态，远端玩家读取随 MapData 同步的状态标记。
+  // 标记优先读 hook 翻译结果，再兜底读原版同步进 character.MapData 的广播镜像，
+  // 覆盖接收端 hook 未安装或对方为早期版本（标记位于 PrivateState）的情况。
   function isCharacterMapViewActive(character) {
     if (!character) return false;
     if (getChatRoomData()?.MapData?.Type === "Always") return true;
     if (Number(character.MemberNumber) === currentMemberNumber()) return isLocalMapViewActive();
-    return character.BMSMapViewActive === true;
+    return character.BMSMapViewActive === true
+      || character.MapData?.BMSMapViewActive === true
+      || character.MapData?.PrivateState?.BMSMapViewActive === true;
   }
 
   function applyStealthMarker(character, mapData) {
@@ -489,14 +493,14 @@
 
   function applyMapViewPresenceMarker(character, mapData) {
     if (!character) return;
-    // PrivateState 是原版地图的玩家私有状态，不能作为跨成员状态通道；插件标记必须放在 MapData 顶层。
-    if (mapData?.BMSMapViewActive === true) character.BMSMapViewActive = true;
+    // 同时识别顶层标记（当前版本）与 PrivateState 标记（早期版本发送端）。
+    if (mapData?.BMSMapViewActive === true || mapData?.PrivateState?.BMSMapViewActive === true) character.BMSMapViewActive = true;
     else delete character.BMSMapViewActive;
   }
 
   // 同步本地地图状态：把持久化的隐藏开关重新映射回 MapData，覆盖重登/对象重建后
   // 新 MapData 丢失 BMSHidden 标记的情况；同时维护地图视角在线标记。
-  // 任一字段变化或强制时立即广播一次，让房间内所有插件端感知。
+  // 标记同时写入顶层与 PrivateState，兼容不同版本接收端；任一字段变化或强制时立即广播。
   function syncLocalMapViewPresence(force = false) {
     const player = getPlayerCharacter();
     if (!player?.MapData) return false;
@@ -505,9 +509,19 @@
     if (hidden) player.MapData.BMSHidden = true;
     else delete player.MapData.BMSHidden;
     const active = isLocalMapViewActive();
-    const changed = (player.MapData.BMSMapViewActive === true) !== active || hiddenChanged;
-    if (active) player.MapData.BMSMapViewActive = true;
-    else delete player.MapData.BMSMapViewActive;
+    const privateState = player.MapData.PrivateState && typeof player.MapData.PrivateState === "object"
+      ? player.MapData.PrivateState
+      : (player.MapData.PrivateState = {});
+    const changed = (player.MapData.BMSMapViewActive === true) !== active
+      || (privateState.BMSMapViewActive === true) !== active
+      || hiddenChanged;
+    if (active) {
+      player.MapData.BMSMapViewActive = true;
+      privateState.BMSMapViewActive = true;
+    } else {
+      delete player.MapData.BMSMapViewActive;
+      delete privateState.BMSMapViewActive;
+    }
     if (active) player.BMSMapViewActive = true;
     else delete player.BMSMapViewActive;
     if (!changed && !force) return true;

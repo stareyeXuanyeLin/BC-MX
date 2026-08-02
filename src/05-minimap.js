@@ -929,11 +929,21 @@
     else openMinimap();
   }
 
+  let lastPresenceSyncAt = 0;
   function installMinimapHooks() {
     if (typeof document === "undefined") return; // 简化地图依赖 DOM，无 DOM 环境（测试沙箱）不安装
     installTeleportReceiveBoost();
     modApi.hookFunction("ChatRoomRun", 0, (args, next) => {
       const result = next(args);
+      // 发送端兜底：即使视图切换 hook 未触发，也在房间运行循环中定期同步地图视角状态
+      // （幂等，仅状态变化时广播），保证跨设备接收端能拿到标记。
+      if (globalThis.CurrentScreen === "ChatRoom" && isMapRoom()) {
+        const now = Date.now();
+        if (now - lastPresenceSyncAt >= 1000) {
+          lastPresenceSyncAt = now;
+          try { syncLocalMapViewPresence(); } catch (error) { warn("定期同步地图视角状态失败", error); }
+        }
+      }
       if (shouldShowMinimap()) {
         if (minimapOpen) minimapTick();
         if (shouldDrawMinimapEntryButton() && typeof globalThis.DrawButton === "function") {

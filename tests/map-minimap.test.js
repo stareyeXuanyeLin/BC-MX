@@ -520,13 +520,18 @@ test("always-map rooms treat every member as map-active without plugin markers",
   assert.equal(api.teleportCharacter(222, 3, 4), "native");
 });
 
-test("hybrid-room presence uses the broadcast MapData root instead of private state", () => {
+test("hybrid-room presence is recognized from either the root or the private-state channel", () => {
   const bob = { MemberNumber: 222 };
   const { api } = createRuntime({ ChatRoomData: { Name: "房", MapData: { Type: "Hybrid" } } });
+  // 早期版本发送端：标记位于 PrivateState
   api.applyMapViewPresenceMarker(bob, { PrivateState: { BMSMapViewActive: true } });
-  assert.equal(api.isCharacterMapViewActive(bob), false);
+  assert.equal(api.isCharacterMapViewActive(bob), true);
+  // 当前版本发送端：标记位于顶层
   api.applyMapViewPresenceMarker(bob, { BMSMapViewActive: true, PrivateState: {} });
   assert.equal(api.isCharacterMapViewActive(bob), true);
+  // 两个通道都没有 → 不在
+  api.applyMapViewPresenceMarker(bob, { PrivateState: {} });
+  assert.equal(api.isCharacterMapViewActive(bob), false);
 });
 
 test("local map view presence is broadcast only when it changes or is forced", () => {
@@ -534,7 +539,7 @@ test("local map view presence is broadcast only when it changes or is forced", (
   const { api, context } = createRuntime({ ServerSend: (type, data) => sent.push({ type, data: plain(data) }) });
   assert.equal(api.syncLocalMapViewPresence(), true);
   assert.equal(context.Player.MapData.BMSMapViewActive, true);
-  assert.equal(context.Player.MapData.PrivateState, undefined);
+  assert.equal(context.Player.MapData.PrivateState.BMSMapViewActive, true);
   assert.equal(sent.length, 1);
   api.syncLocalMapViewPresence();
   assert.equal(sent.length, 1);
@@ -542,6 +547,7 @@ test("local map view presence is broadcast only when it changes or is forced", (
   context.ChatRoomMapViewIsActive = () => false;
   api.syncLocalMapViewPresence();
   assert.equal(context.Player.MapData.BMSMapViewActive, undefined);
+  assert.equal(context.Player.MapData.PrivateState.BMSMapViewActive, undefined);
   assert.equal(sent.length, 2);
   api.syncLocalMapViewPresence(true);
   assert.equal(sent.length, 3);
@@ -562,11 +568,75 @@ test("switching between character and map views broadcasts the new presence imme
   assert.equal(sent.length, 1);
   assert.equal(sent[0].type, "ChatRoomCharacterMapDataUpdate");
   assert.equal(sent[0].data.BMSMapViewActive, true);
-  assert.equal(sent[0].data.PrivateState, undefined);
+  assert.equal(sent[0].data.PrivateState.BMSMapViewActive, true);
 
   context.ChatRoomActivateView("Character");
   assert.equal(sent.length, 2);
   assert.equal(sent[1].data.BMSMapViewActive, undefined);
+  assert.equal(sent[1].data.PrivateState.BMSMapViewActive, undefined);
+});
+
+test("presence falls back to the broadcast mirror stored on the remote MapData", () => {
+  const { api, context } = createRuntime({ ChatRoomData: { Name: "房", MapData: { Type: "Hybrid" } } });
+  const alice = context.ChatRoomCharacter.find(character => character.MemberNumber === 111);
+  delete alice.BMSMapViewActive;
+  assert.equal(api.isCharacterMapViewActive(alice), false);
+  // 模拟接收端原版把广播 MapData（含标记）赋给角色，但插件接收 hook 未安装
+  alice.MapData = { Pos: { X: 6, Y: 6 }, BMSMapViewActive: true };
+  assert.equal(api.isCharacterMapViewActive(alice), true);
+  // 顶层字段移除后回到不在
+  alice.MapData = { Pos: { X: 6, Y: 6 } };
+  assert.equal(api.isCharacterMapViewActive(alice), false);
+});
+
+test("map view presence survives a server round trip onto the remote character", () => {
+  // 发送端 A：写入标记并广播
+  const sentFromA = [];
+  const a = createRuntime({
+    Player: { MemberNumber: 999, MapData: { Pos: { X: 20, Y: 20 } } },
+    ChatRoomMapViewIsActive: () => true,
+    ServerSend: (type, data) => sentFromA.push({ type, data }),
+  });
+  a.api.syncLocalMapViewPresence();
+  const broadcast = sentFromA.find(message => message.type === "ChatRoomCharacterMapDataUpdate");
+  assert.ok(broadcast);
+  assert.equal(broadcast.data.BMSMapViewActive, true);
+
+  // 服务器原样转发（与官方服务器实现一致）
+  const serverEmit = { MemberNumber: 999, MapData: broadcast.data };
+
+  // 接收端 B：原版将广播 MapData 赋给角色，插件 hook 翻译标记
+  const b = createRuntime({ ChatRoomData: { Name: "房", MapData: { Type: "Hybrid" } } });
+  b.context.ChatRoomCharacter.push({ MemberNumber: 999, Name: "Alice", MapData: { Pos: { X: 1, Y: 1 } } });
+  b.context.ChatRoomMapViewSyncMapData = data => {
+    const char = b.context.ChatRoomCharacter.find(character => character.MemberNumber === data.MemberNumber);
+    if (char) char.MapData = { ...data.MapData, Pos: { ...data.MapData.Pos } };
+  };
+  b.api.installHooksForTest(createModApi(b.context));
+  b.context.ChatRoomMapViewSyncMapData(serverEmit);
+  const alice = b.context.ChatRoomCharacter.find(character => character.MemberNumber === 999);
+  assert.equal(b.api.isCharacterMapViewActive(alice), true);
+});
+
+test("room run loop re-broadcasts presence even when the view-switch hook is absent", async () => {
+  let mapActive = false;
+  const sent = [];
+  const { api, context } = createRuntime({
+    ChatRoomMapViewIsActive: () => mapActive,
+    ServerSend: (type, data) => sent.push({ type, data: plain(data) }),
+  });
+  context.document = {}; // 允许小地图 hook 安装
+  api.installHooksForTest(createModApi(context));
+  // 玩家已切到地图视图，但视图切换 hook 缺失：标记从未写入，也无广播
+  mapActive = true;
+  sent.length = 0;
+  context.ChatRoomRun();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  context.ChatRoomRun(); // 节流窗口内，不应重复广播
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, "ChatRoomCharacterMapDataUpdate");
+  assert.equal(sent[0].data.BMSMapViewActive, true);
 });
 
 test("non-admin teleport is restricted to self and reachable tiles", () => {
@@ -718,7 +788,7 @@ test("active map player rebroadcasts plugin markers after a member joins", async
   assert.equal(sent.length, 1);
   assert.equal(sent[0].data.BMSHidden, undefined);
   assert.equal(sent[0].data.BMSMapViewActive, true);
-  assert.equal(sent[0].data.PrivateState, undefined);
+  assert.equal(sent[0].data.PrivateState.BMSMapViewActive, true);
 });
 
 test("relog: stealth storage is restored onto fresh MapData and included in rebroadcast", async () => {
