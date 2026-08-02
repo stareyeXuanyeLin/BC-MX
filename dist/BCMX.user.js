@@ -2128,8 +2128,12 @@
     }
   }
 
-  function editorStyleLabel(style, id) {
+  function editorStyleLabel(style, id, type) {
     const name = String(style || "");
+    // 六边形地面与六边形墙壁同名，按类型区分
+    if ((name === "HexBlue" || name === "HexPurple") && EDITOR_STYLE_LABELS[name]) {
+      return `${EDITOR_STYLE_LABELS[name]}（${type === "Wall" ? "墙壁" : "地面"}）`;
+    }
     if (EDITOR_STYLE_LABELS[name]) return EDITOR_STYLE_LABELS[name];
     let match = /^Number(\d)$/.exec(name);
     if (match) return `数字 ${match[1]}`;
@@ -2150,7 +2154,7 @@
         layer,
         type: String(item.Type || "Other"),
         style: String(item.Style || item.ID),
-        label: editorStyleLabel(item.Style, item.ID),
+        label: editorStyleLabel(item.Style, item.ID, item.Type),
         owned: layer === EDITOR_LAYER_TILE || editorMaterialOwned(item, player, inventoryAvailable),
         unique: item.Unique === true,
         definition: item,

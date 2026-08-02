@@ -154,6 +154,25 @@ test("materials use simplified Chinese labels and remain searchable by Chinese, 
   assert.deepEqual(plain(api.filterEditorMaterials(materials, "", "100")).map(item => item.id), [100]);
 });
 
+test("hexagon floor and wall styles share the same name and get disambiguated labels", () => {
+  const { api } = createRuntime();
+  const lookup = {
+    100: { ID: 100, Type: "Floor", Style: "HexPurple" },
+    101: { ID: 101, Type: "Floor", Style: "HexBlue" },
+    200: { ID: 200, Type: "Wall", Style: "HexPurple" },
+    201: { ID: 201, Type: "Wall", Style: "HexBlue" },
+  };
+  const labels = plain(api.buildEditorMaterials("tile", lookup)).map(item => `${item.type}:${item.label}`);
+  assert.deepEqual(labels, [
+    "Floor:紫色六边形（地面）",
+    "Floor:蓝色六边形（地面）",
+    "Wall:紫色六边形（墙壁）",
+    "Wall:蓝色六边形（墙壁）",
+  ]);
+  // 子串搜索仍能命中
+  assert.deepEqual(plain(api.filterEditorMaterials(api.buildEditorMaterials("tile", lookup), "", "紫色六边形")).map(item => item.label), ["紫色六边形（地面）", "紫色六边形（墙壁）"]);
+});
+
 test("asset-bound objects are greyed logically when inventory ownership is missing", () => {
   const { api, context } = createRuntime();
   const lookup = {
