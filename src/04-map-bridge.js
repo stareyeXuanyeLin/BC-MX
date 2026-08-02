@@ -413,8 +413,8 @@
   }
 
   // ===== 小地图状态同步 =====
-  // 坐标隐藏沿用 MapData.BMSHidden；地图视角状态写入原版允许扩展的 PrivateState，
-  // 随正常 MapData 广播流转。接收端仅在插件侧维护角色状态，原版渲染不读取这些标记。
+  // 坐标隐藏与地图视角状态都放在 MapData 顶层，随正常 MapData 广播流转。
+  // 接收端仅在插件侧维护角色状态，原版渲染不读取这些标记。
 
   // 隐藏状态存储键沿用历史前缀（BC.MapSaver.stealth），已开启隐藏的用户升级后状态保留。
   const STEALTH_STORAGE_PREFIX = "BC.MapSaver.stealth";
@@ -472,10 +472,11 @@
     return typeof globalThis.ChatRoomMapViewIsActive === "function" && globalThis.ChatRoomMapViewIsActive() === true;
   }
 
-  // 自己读原版实时视图状态；远端玩家读取插件随 MapData 同步的状态标记。
-  // 未安装插件或尚未上报状态的玩家按“不在地图视角”处理，避免发出必然失败的传送。
+  // Always 房间由原版规则保证全员处于地图视图，不依赖插件标记；Hybrid 房间中，
+  // 自己读取原版实时视图状态，远端玩家读取插件随 MapData 同步的状态标记。
   function isCharacterMapViewActive(character) {
     if (!character) return false;
+    if (getChatRoomData()?.MapData?.Type === "Always") return true;
     if (Number(character.MemberNumber) === currentMemberNumber()) return isLocalMapViewActive();
     return character.BMSMapViewActive === true;
   }

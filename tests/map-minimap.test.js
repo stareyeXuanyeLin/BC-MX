@@ -497,8 +497,11 @@ test("reachability detects enclosed areas for non-admin teleport", () => {
   assert.equal(api.isPositionReachable(grid, 4, 4, 40, 4), false);
 });
 
-test("remote players outside the map view cannot be teleported", () => {
-  const { api, context } = createRuntime({ ChatRoomMapViewTeleport: () => {} });
+test("remote players outside the map view cannot be teleported in hybrid rooms", () => {
+  const { api, context } = createRuntime({
+    ChatRoomData: { Name: "房", MapData: { Type: "Hybrid" } },
+    ChatRoomMapViewTeleport: () => {},
+  });
   const bob = context.ChatRoomCharacter.find(character => character.MemberNumber === 222);
   delete bob.BMSMapViewActive;
   assert.equal(api.isCharacterMapViewActive(bob), false);
@@ -509,9 +512,17 @@ test("remote players outside the map view cannot be teleported", () => {
   assert.equal(api.teleportCharacter(222, 3, 4), "native");
 });
 
-test("map view presence uses the broadcast MapData root instead of private state", () => {
+test("always-map rooms treat every member as map-active without plugin markers", () => {
+  const { api, context } = createRuntime({ ChatRoomMapViewTeleport: () => {} });
+  const bob = context.ChatRoomCharacter.find(character => character.MemberNumber === 222);
+  delete bob.BMSMapViewActive;
+  assert.equal(api.isCharacterMapViewActive(bob), true);
+  assert.equal(api.teleportCharacter(222, 3, 4), "native");
+});
+
+test("hybrid-room presence uses the broadcast MapData root instead of private state", () => {
   const bob = { MemberNumber: 222 };
-  const { api } = createRuntime();
+  const { api } = createRuntime({ ChatRoomData: { Name: "房", MapData: { Type: "Hybrid" } } });
   api.applyMapViewPresenceMarker(bob, { PrivateState: { BMSMapViewActive: true } });
   assert.equal(api.isCharacterMapViewActive(bob), false);
   api.applyMapViewPresenceMarker(bob, { BMSMapViewActive: true, PrivateState: {} });
