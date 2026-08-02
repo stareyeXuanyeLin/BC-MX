@@ -147,7 +147,6 @@
       syncLocalMapViewPresence,
       installStealthHooks,
       teleportVerificationMessage,
-      chooseAdminFlipPlan,
       triggerSilentMapDataRefresh,
       forceSyncUnsyncedTarget,
       isTeleportMessageFor,

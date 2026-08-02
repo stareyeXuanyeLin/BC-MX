@@ -281,9 +281,9 @@
     return globalThis.ChatRoomGetSettings ?? null;
   }
 
-  // 旧版 fog flip 回退：服务器对无变化的 ChatRoomAdmin Update 可能去重，因此先让
-  // 房间迷雾产生一次真实变化，再立即恢复原状。默认传送同步不再走此路径；保留它只为
-  // Admin 列表缺失或无法制定安全权限翻转计划的兼容场景，便于双账号实测期间快速回滚。
+  // 旧版 fog flip 实现：服务器对无变化的 ChatRoomAdmin Update 可能去重，因此先让
+  // 房间迷雾产生一次真实变化，再立即恢复原状。新传送链路不会自动调用它；暂时保留
+  // 这段代码只为双账号实测期间能够手动回滚，哨兵同步失败时直接安全退出。
   function triggerRoomPropertiesSync() {
     const serverSend = getServerSend();
     const getSettings = getChatRoomGetSettings();
@@ -318,68 +318,46 @@
     }
   }
 
-  const SILENT_ADMIN_FLIP_RECOVERY_DELAY_MS = 1500;
-  let silentAdminFlipInProgress = false;
-
-  // 纯逻辑规划：普通目标直接 Promote→Demote；目标原本是管理员时优先借用另一名
-  // 普通成员，房间内没有 helper 才对目标执行 Demote→Promote。永不对当前玩家执行
-  // Promote/Demote，因为 BC 服务端会拒绝管理员对自己的这类管理动作。
-  function chooseAdminFlipPlan(targetMemberNumber, roomAdminList, roomCharacters, selfMemberNumber) {
-    const target = Number(targetMemberNumber);
-    const self = Number(selfMemberNumber);
-    if (!Number.isInteger(target) || !Number.isInteger(self) || !Array.isArray(roomAdminList)) return null;
-    const admins = new Set(roomAdminList.map(Number).filter(Number.isInteger));
-    if (!admins.has(target)) {
-      if (target === self) return null;
-      return { memberNumber: target, firstAction: "Promote", restoreAction: "Demote", expectedFinalAdmin: false, mode: "admin-flip" };
-    }
-    const helper = (Array.isArray(roomCharacters) ? roomCharacters : []).find(character => {
-      const member = Number(character?.MemberNumber);
-      return Number.isInteger(member) && member !== self && member !== target && !admins.has(member);
-    });
-    if (helper) {
-      return { memberNumber: Number(helper.MemberNumber), firstAction: "Promote", restoreAction: "Demote", expectedFinalAdmin: false, mode: "helper-flip" };
-    }
-    if (target === self) return null;
-    return { memberNumber: target, firstAction: "Demote", restoreAction: "Promote", expectedFinalAdmin: true, mode: "admin-restore-flip" };
-  }
+  const SILENT_ROOM_SYNC_SENTINEL_MEMBER = 0;
+  const SILENT_ROOM_SYNC_RECOVERY_DELAY_MS = 1500;
+  let silentRoomSyncInProgress = false;
 
   function roomIdentity(room) {
     if (!room) return "";
     return `${String(room.Space ?? "")}|${String(room.Name ?? "")}`;
   }
 
-  // 制造一次静默房间属性变化。Promote/Demote 均支持 Publish:false；服务端同步 Admin
-  // 列表时，各客户端会重新初始化并广播自己的 MapData，从而让聊天视图目标的新位置生效。
-  // 两包背靠背发送，随后只做一次最终权限状态补偿，不扩展为持久事务或 watchdog。
-  function triggerSilentMapDataRefresh(preferredMemberNumber) {
-    if (silentAdminFlipInProgress) return false;
+  // BC 服务端对房间外成员执行 Whitelist/Unwhitelist 时不会发布 Action，但仍会调用
+  // ChatRoomSyncRoomProperties。正式账号 MemberNumber 从 1 开始，因此用 0 作为无对应
+  // 账号的哨兵：不会改变任何真人权限，又能迫使所有客户端重新广播自己的 MapData。
+  // 若上次异常遗留了 0，本次只发送 Unwhitelist；该清理包本身也足以触发一次同步。
+  function triggerSilentMapDataRefresh() {
+    if (silentRoomSyncInProgress) return false;
     const serverSend = getServerSend();
     const room = getChatRoomData();
-    const selfMemberNumber = currentMemberNumber();
-    if (!serverSend || !room || !isRoomAdmin()) return false;
-    const plan = chooseAdminFlipPlan(preferredMemberNumber, room.Admin, getChatRoomCharacterList(), selfMemberNumber);
-    if (!plan) return triggerRoomPropertiesSync() ? "fallback" : false;
+    if (!serverSend || !room || !Array.isArray(room.Whitelist) || !isRoomAdmin()) return false;
 
     const originalRoomIdentity = roomIdentity(room);
+    const sentinelAlreadyPresent = room.Whitelist.map(Number).includes(SILENT_ROOM_SYNC_SENTINEL_MEMBER);
     let firstActionSent = false;
-    silentAdminFlipInProgress = true;
+    silentRoomSyncInProgress = true;
     try {
+      if (!sentinelAlreadyPresent) {
+        serverSend("ChatRoomAdmin", {
+          MemberNumber: SILENT_ROOM_SYNC_SENTINEL_MEMBER,
+          Action: "Whitelist",
+        });
+        firstActionSent = true;
+      }
       serverSend("ChatRoomAdmin", {
-        MemberNumber: plan.memberNumber,
-        Action: plan.firstAction,
-        Publish: false,
+        MemberNumber: SILENT_ROOM_SYNC_SENTINEL_MEMBER,
+        Action: "Unwhitelist",
       });
       firstActionSent = true;
-      serverSend("ChatRoomAdmin", {
-        MemberNumber: plan.memberNumber,
-        Action: plan.restoreAction,
-        Publish: false,
-      });
     } catch (error) {
-      warn("静默管理员权限翻转失败", error);
+      warn("静默白名单哨兵同步失败", error);
       if (!firstActionSent) {
-        silentAdminFlipInProgress = false;
+        silentRoomSyncInProgress = false;
         return false;
       }
     }
@@ -388,22 +366,19 @@
       try {
         const currentRoom = getChatRoomData();
         if (globalThis.CurrentScreen !== "ChatRoom" || roomIdentity(currentRoom) !== originalRoomIdentity) return;
-        if (!isRoomAdmin() || !findRoomCharacter(plan.memberNumber)) return;
-        const isCurrentlyAdmin = Array.isArray(currentRoom?.Admin)
-          && currentRoom.Admin.map(Number).includes(plan.memberNumber);
-        if (isCurrentlyAdmin === plan.expectedFinalAdmin) return;
+        if (!isRoomAdmin() || !Array.isArray(currentRoom?.Whitelist)) return;
+        if (!currentRoom.Whitelist.map(Number).includes(SILENT_ROOM_SYNC_SENTINEL_MEMBER)) return;
         serverSend("ChatRoomAdmin", {
-          MemberNumber: plan.memberNumber,
-          Action: plan.restoreAction,
-          Publish: false,
+          MemberNumber: SILENT_ROOM_SYNC_SENTINEL_MEMBER,
+          Action: "Unwhitelist",
         });
       } catch (error) {
-        warn("静默管理员权限恢复检查失败", error);
+        warn("静默白名单哨兵恢复检查失败", error);
       } finally {
-        silentAdminFlipInProgress = false;
+        silentRoomSyncInProgress = false;
       }
-    }, SILENT_ADMIN_FLIP_RECOVERY_DELAY_MS);
-    return plan.mode;
+    }, SILENT_ROOM_SYNC_RECOVERY_DELAY_MS);
+    return sentinelAlreadyPresent ? "sentinel-cleanup" : "sentinel-toggle";
   }
 
   function getServerSend() {
@@ -498,7 +473,7 @@
     return "fallback";
   }
 
-  // 传送后的按需同步：目标位置尚未广播回本地视角时，默认通过静默权限翻转触发
+  // 传送后的按需同步：目标位置尚未广播回本地视角时，通过房间外白名单哨兵触发
   // ChatRoomSyncRoomProperties，强制所有客户端重广播 MapData。已同步、事务占用或环境
   // 已失效时保持零打扰。返回是否成功启动了同步动作。
   function forceSyncUnsyncedTarget(memberNumber, x, y) {
@@ -506,7 +481,7 @@
     if (!target) return false;
     const pos = target.MapData?.Pos;
     if (pos?.X === Number(x) && pos?.Y === Number(y)) return false;
-    return !!triggerSilentMapDataRefresh(memberNumber);
+    return !!triggerSilentMapDataRefresh();
   }
 
   // ===== 小地图状态同步 =====

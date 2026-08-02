@@ -71,6 +71,7 @@ function createRuntime(overrides = {}) {
       Name: "测试地图房",
       Space: "",
       Admin: [12345],
+      Whitelist: [],
       MapData: { Type: "Always", Tiles: String.fromCharCode(100).repeat(1600), Objects: String.fromCharCode(0).repeat(1600) },
     },
     ChatRoomCharacter: [
@@ -244,37 +245,7 @@ test("teleport itself no longer spams room update messages", () => {
   assert.equal(sent[0].data.Content, "ChatRoomMapViewTeleport");
 });
 
-test("admin flip planning preserves original permissions and excludes self/admin helpers", () => {
-  const { api } = createRuntime();
-  assert.deepEqual(plain(api.chooseAdminFlipPlan(222, [12345], [{ MemberNumber: 222 }], 12345)), {
-    memberNumber: 222,
-    firstAction: "Promote",
-    restoreAction: "Demote",
-    expectedFinalAdmin: false,
-    mode: "admin-flip",
-  });
-  assert.deepEqual(plain(api.chooseAdminFlipPlan(222, [12345, 222, 333], [
-    { MemberNumber: 12345 },
-    { MemberNumber: 333 },
-    { MemberNumber: 111 },
-  ], 12345)), {
-    memberNumber: 111,
-    firstAction: "Promote",
-    restoreAction: "Demote",
-    expectedFinalAdmin: false,
-    mode: "helper-flip",
-  });
-  assert.deepEqual(plain(api.chooseAdminFlipPlan(222, [12345, 222], [{ MemberNumber: 222 }], 12345)), {
-    memberNumber: 222,
-    firstAction: "Demote",
-    restoreAction: "Promote",
-    expectedFinalAdmin: true,
-    mode: "admin-restore-flip",
-  });
-  assert.equal(api.chooseAdminFlipPlan(12345, [12345], [], 12345), null);
-});
-
-test("unsynced ordinary target uses silent Promote then Demote; synced target stays silent", () => {
+test("unsynced target toggles only the out-of-room whitelist sentinel; synced target stays silent", () => {
   const sent = [];
   const timers = [];
   const { api, context } = createRuntime({
@@ -290,23 +261,25 @@ test("unsynced ordinary target uses silent Promote then Demote; synced target st
   const originalMapData = plain(context.ChatRoomData.MapData);
   assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), true);
   assert.deepEqual(plain(sent), [
-    { type: "ChatRoomAdmin", data: { MemberNumber: 222, Action: "Promote", Publish: false } },
-    { type: "ChatRoomAdmin", data: { MemberNumber: 222, Action: "Demote", Publish: false } },
+    { type: "ChatRoomAdmin", data: { MemberNumber: 0, Action: "Whitelist" } },
+    { type: "ChatRoomAdmin", data: { MemberNumber: 0, Action: "Unwhitelist" } },
   ]);
-  assert.equal(sent.some(message => message.data.Action === "Update"), false);
+  assert.equal(sent.some(message => ["Update", "Promote", "Demote"].includes(message.data.Action)), false);
+  assert.equal(sent.some(message => "Publish" in message.data), false);
   assert.deepEqual(plain(context.ChatRoomData.MapData), originalMapData);
 
-  timers[0](); // Admin 最终状态已恢复，不发送补偿包
+  timers[0](); // 白名单中没有哨兵，不发送补偿包
   assert.equal(sent.length, 2);
 });
 
-test("admin target uses a non-admin helper and never Promote→Demote on the admin target", () => {
+test("admin target uses the same member-zero sentinel and never changes a real member role", () => {
   const sent = [];
   const { api } = createRuntime({
     ChatRoomData: {
       Name: "房",
       Space: "",
-      Admin: [12345, 222, 333],
+      Admin: [12345, 222],
+      Whitelist: [111],
       MapData: { Type: "Always", Tiles: "t", Objects: "o" },
     },
     ServerSend: (type, data) => sent.push({ type, data }),
@@ -314,52 +287,64 @@ test("admin target uses a non-admin helper and never Promote→Demote on the adm
   });
   assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), true);
   assert.deepEqual(plain(sent.map(message => message.data)), [
-    { MemberNumber: 111, Action: "Promote", Publish: false },
-    { MemberNumber: 111, Action: "Demote", Publish: false },
+    { MemberNumber: 0, Action: "Whitelist" },
+    { MemberNumber: 0, Action: "Unwhitelist" },
   ]);
 });
 
-test("admin target without a helper uses Demote then Promote to restore its original role", () => {
-  const sent = [];
-  const { api } = createRuntime({
-    ChatRoomData: {
-      Name: "房",
-      Space: "",
-      Admin: [12345, 222, 111, 333],
-      MapData: { Type: "Always", Tiles: "t", Objects: "o" },
-    },
-    ServerSend: (type, data) => sent.push({ type, data }),
-    setTimeout: () => 1,
-  });
-  assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), true);
-  assert.deepEqual(plain(sent.map(message => message.data)), [
-    { MemberNumber: 222, Action: "Demote", Publish: false },
-    { MemberNumber: 222, Action: "Promote", Publish: false },
-  ]);
-});
-
-test("recovery check repairs a residual temporary admin role exactly once", () => {
+test("an existing sentinel residue is cleaned with one Unwhitelist that also triggers the refresh", () => {
   const sent = [];
   const timers = [];
   const { api, context } = createRuntime({
+    ChatRoomData: {
+      Name: "房",
+      Space: "",
+      Admin: [12345],
+      Whitelist: [0, 111],
+      MapData: { Type: "Always", Tiles: "t", Objects: "o" },
+    },
     ServerSend: (type, data) => sent.push({ type, data }),
     setTimeout: callback => { timers.push(callback); return timers.length; },
   });
   assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), true);
-  context.ChatRoomData.Admin.push(222); // 模拟首次 Demote 丢失
+  assert.deepEqual(plain(sent), [
+    { type: "ChatRoomAdmin", data: { MemberNumber: 0, Action: "Unwhitelist" } },
+  ]);
+  context.ChatRoomData.Whitelist = [111]; // 模拟服务器同步回已清理状态
   timers[0]();
-  assert.equal(sent.length, 3);
-  assert.deepEqual(plain(sent[2]), {
+  assert.equal(sent.length, 1);
+});
+
+test("recovery check removes a sentinel left behind when the first Unwhitelist send fails", () => {
+  const sent = [];
+  const timers = [];
+  let sendCount = 0;
+  const { api, context } = createRuntime({
+    console: { log: console.log, error: console.error, warn: () => {} },
+    ServerSend: (type, data) => {
+      sendCount += 1;
+      if (sendCount === 2) throw new Error("模拟第二包发送失败");
+      sent.push({ type, data });
+    },
+    setTimeout: callback => { timers.push(callback); return timers.length; },
+  });
+  assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), true);
+  assert.deepEqual(plain(sent), [
+    { type: "ChatRoomAdmin", data: { MemberNumber: 0, Action: "Whitelist" } },
+  ]);
+  context.ChatRoomData.Whitelist.push(0);
+  timers[0]();
+  assert.deepEqual(plain(sent[1]), {
     type: "ChatRoomAdmin",
-    data: { MemberNumber: 222, Action: "Demote", Publish: false },
+    data: { MemberNumber: 0, Action: "Unwhitelist" },
   });
 });
 
-test("recovery check aborts after room/admin/character context becomes invalid", () => {
+test("sentinel recovery aborts after room or admin context becomes invalid", () => {
   for (const invalidate of [
     context => { context.ChatRoomData.Name = "另一个房间"; },
     context => { context.ChatRoomPlayerIsAdmin = () => false; },
-    context => { context.ChatRoomCharacter = context.ChatRoomCharacter.filter(character => character.MemberNumber !== 222); },
+    context => { context.CurrentScreen = "ChatSearch"; },
   ]) {
     const sent = [];
     const timers = [];
@@ -368,14 +353,14 @@ test("recovery check aborts after room/admin/character context becomes invalid",
       setTimeout: callback => { timers.push(callback); return timers.length; },
     });
     api.forceSyncUnsyncedTarget(222, 3, 4);
-    context.ChatRoomData.Admin.push(222);
+    context.ChatRoomData.Whitelist.push(0);
     invalidate(context);
     timers[0]();
     assert.equal(sent.length, 2);
   }
 });
 
-test("a second silent flip cannot start until the first recovery check finishes", () => {
+test("a second sentinel toggle cannot start until the first recovery check finishes", () => {
   const sent = [];
   const timers = [];
   const { api } = createRuntime({
@@ -390,6 +375,21 @@ test("a second silent flip cannot start until the first recovery check finishes"
   assert.equal(sent.length, 4);
 });
 
+test("missing whitelist state fails closed without falling back to room updates or role changes", () => {
+  const sent = [];
+  const { api } = createRuntime({
+    ChatRoomData: {
+      Name: "房",
+      Space: "",
+      Admin: [12345],
+      MapData: { Type: "Always", Tiles: "t", Objects: "o" },
+    },
+    ServerSend: (type, data) => sent.push({ type, data }),
+  });
+  assert.equal(api.forceSyncUnsyncedTarget(222, 3, 4), false);
+  assert.equal(sent.length, 0);
+});
+
 test("native teleport stays silent until the target is verified unsynced", () => {
   const sent = [];
   const nativeCalls = [];
@@ -402,7 +402,10 @@ test("native teleport stays silent until the target is verified unsynced", () =>
   assert.equal(nativeCalls.length, 1);
   assert.equal(sent.length, 0);
   api.forceSyncUnsyncedTarget(222, 7, 9);
-  assert.deepEqual(plain(sent.map(message => message.data.Action)), ["Promote", "Demote"]);
+  assert.deepEqual(plain(sent.map(message => message.data)), [
+    { MemberNumber: 0, Action: "Whitelist" },
+    { MemberNumber: 0, Action: "Unwhitelist" },
+  ]);
 });
 
 test("fallback teleport of self applies the position locally and sends the message", () => {
