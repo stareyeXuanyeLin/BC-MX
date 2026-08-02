@@ -606,6 +606,10 @@
     setTimeout(() => {
       const target = findRoomCharacter(member);
       toast(teleportVerificationMessage(target, x, y), target ? "success" : "error");
+      // 目标未广播新位置（无插件且处于聊天视图）：按需触发一次全房间属性同步强制重广播
+      if (target) {
+        try { forceSyncUnsyncedTarget(member, x, y); } catch (error) { warn("按需同步失败", error); }
+      }
     }, MINIMAP_VERIFY_DELAY_MS);
   }
 
@@ -713,6 +717,13 @@
           reportSwapResult(first);
           finishSwap();
           return;
+        }
+        // 未完全同步：对未广播的目标按需触发一次全房间属性同步，强制双方位置生效
+        try {
+          if (!first.aOk) forceSyncUnsyncedTarget(aMember, finalA.x, finalA.y);
+          else if (!first.bOk) forceSyncUnsyncedTarget(bMember, finalB.x, finalB.y);
+        } catch (error) {
+          warn("换位按需同步失败", error);
         }
         // 广播可能因原版节流或网络延迟晚到：复查一轮再下结论，避免误报失败
         setTimeout(() => {

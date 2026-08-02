@@ -403,7 +403,6 @@
     const nativeTeleport = getChatRoomMapViewTeleport();
     if (nativeTeleport) {
       nativeTeleport(target, position);
-      triggerRoomPropertiesSync();
       return "native";
     }
     const serverSend = getServerSend();
@@ -411,8 +410,19 @@
     const player = getPlayerCharacter();
     if (target === player && target.Position) target.Position = position; // 对齐原版“传自己本地立即生效”语义
     serverSend("ChatRoomChat", createTeleportMessage(memberNumber, tx, ty));
-    triggerRoomPropertiesSync();
     return "fallback";
+  }
+
+  // 传送后的按需同步：目标位置尚未广播回本地视角（无插件且处于聊天视图）时，
+  // 触发一次全房间属性同步，强制所有客户端重广播自己的 MapData，让目标新位置立即生效。
+  // 已同步则零打扰（不发任何房间更新消息）。返回是否触发了同步。
+  function forceSyncUnsyncedTarget(memberNumber, x, y) {
+    const target = findRoomCharacter(memberNumber);
+    if (!target) return false;
+    const pos = target.MapData?.Pos;
+    if (pos?.X === Number(x) && pos?.Y === Number(y)) return false;
+    triggerRoomPropertiesSync();
+    return true;
   }
 
   // ===== 小地图状态同步 =====

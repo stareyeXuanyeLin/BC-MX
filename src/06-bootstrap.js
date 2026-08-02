@@ -147,6 +147,7 @@
       syncLocalMapViewPresence,
       installStealthHooks,
       teleportVerificationMessage,
+      forceSyncUnsyncedTarget,
       isTeleportMessageFor,
       buildSwapTeleportPlan,
       isPositionReachable,

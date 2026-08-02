@@ -844,7 +844,6 @@
     const nativeTeleport = getChatRoomMapViewTeleport();
     if (nativeTeleport) {
       nativeTeleport(target, position);
-      triggerRoomPropertiesSync();
       return "native";
     }
     const serverSend = getServerSend();
@@ -852,8 +851,19 @@
     const player = getPlayerCharacter();
     if (target === player && target.Position) target.Position = position; // 对齐原版“传自己本地立即生效”语义
     serverSend("ChatRoomChat", createTeleportMessage(memberNumber, tx, ty));
-    triggerRoomPropertiesSync();
     return "fallback";
+  }
+
+  // 传送后的按需同步：目标位置尚未广播回本地视角（无插件且处于聊天视图）时，
+  // 触发一次全房间属性同步，强制所有客户端重广播自己的 MapData，让目标新位置立即生效。
+  // 已同步则零打扰（不发任何房间更新消息）。返回是否触发了同步。
+  function forceSyncUnsyncedTarget(memberNumber, x, y) {
+    const target = findRoomCharacter(memberNumber);
+    if (!target) return false;
+    const pos = target.MapData?.Pos;
+    if (pos?.X === Number(x) && pos?.Y === Number(y)) return false;
+    triggerRoomPropertiesSync();
+    return true;
   }
 
   // ===== 小地图状态同步 =====
@@ -1653,6 +1663,10 @@
     setTimeout(() => {
       const target = findRoomCharacter(member);
       toast(teleportVerificationMessage(target, x, y), target ? "success" : "error");
+      // 目标未广播新位置（无插件且处于聊天视图）：按需触发一次全房间属性同步强制重广播
+      if (target) {
+        try { forceSyncUnsyncedTarget(member, x, y); } catch (error) { warn("按需同步失败", error); }
+      }
     }, MINIMAP_VERIFY_DELAY_MS);
   }
 
@@ -1760,6 +1774,13 @@
           reportSwapResult(first);
           finishSwap();
           return;
+        }
+        // 未完全同步：对未广播的目标按需触发一次全房间属性同步，强制双方位置生效
+        try {
+          if (!first.aOk) forceSyncUnsyncedTarget(aMember, finalA.x, finalA.y);
+          else if (!first.bOk) forceSyncUnsyncedTarget(bMember, finalB.x, finalB.y);
+        } catch (error) {
+          warn("换位按需同步失败", error);
         }
         // 广播可能因原版节流或网络延迟晚到：复查一轮再下结论，避免误报失败
         setTimeout(() => {
@@ -3632,6 +3653,7 @@
       syncLocalMapViewPresence,
       installStealthHooks,
       teleportVerificationMessage,
+      forceSyncUnsyncedTarget,
       isTeleportMessageFor,
       buildSwapTeleportPlan,
       isPositionReachable,
